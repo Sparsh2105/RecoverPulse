@@ -1,36 +1,41 @@
 ﻿/**
  * @file controllers/webhookController.js
  * @description Handles ingestion of failed-payment webhook events.
- * Delegates payload validation to middleware/validate.js and persists
- * records via the TransactionRecord Mongoose model.
  */
 
 'use strict';
 
 const TransactionRecord      = require('../models/TransactionRecord');
 const { validatePaymentPayload } = require('../middleware/validate');
-
-// ---------------------------------------------------------------------------
-// Controller
-// ---------------------------------------------------------------------------
+const { classifyErrorCode } = require('../services/triageService');
+const { getNextState } = require('../services/stateMachine');
+const { scheduleRetry } = require('../services/retryScheduler');
 
 /**
- * POST /api/webhooks/payment-failed
- *
- * Ingests a failed payment webhook event:
- *   1. Validates the request body via `validatePaymentPayload`.
- *   2. Checks for duplicate `paymentId` (idempotency guard).
- *   3. Persists a new TransactionRecord in state FAILED_PAYMENT_INGESTED.
- *   4. Broadcasts `txn:created` to all Socket.IO clients.
- *   5. Returns 201 with the created document.
- *
- * @param {import('express').Request}  req - Express request (body must contain payment fields).
- * @param {import('express').Response} res - Express response.
- * @returns {Promise<void>}
+ * Triages the transaction asynchronously.
  */
+async function triageAndRoute(transaction) {
+  try {
+    const category = classifyErrorCode(transaction.errorCode);
+    transaction.errorCategory = category;
+
+    if (category === 'infra') {
+      // Infra -> Silent Retry Pipeline
+      await transaction.save();
+      await scheduleRetry(transaction, 1);
+    } else {
+      // Soft / Hard -> Direct to Outreach
+      transaction.state = getNextState(transaction.state, 'OUTREACH_INITIATED');
+      await transaction.save();
+      console.log(`[Triage] Txn ${transaction._id} classified as ${category}. Moved to OUTREACH_INITIATED.`);
+    }
+  } catch (err) {
+    console.error(`[Triage] Error triaging txn ${transaction._id}:`, err.message);
+  }
+}
+
 async function ingestFailedPayment(req, res) {
   try {
-    // -- Step 1: Validate payload (pure, no DB) -----------------------------
     const validation = validatePaymentPayload(req.body);
     if (!validation.valid) {
       const { status, errorCode, error, ...extras } = validation;
@@ -39,7 +44,6 @@ async function ingestFailedPayment(req, res) {
 
     const { sanitized } = validation;
 
-    // -- Step 2: Idempotency â€” reject duplicate paymentId ------------------
     if (sanitized.paymentId) {
       const existing = await TransactionRecord.findOne({ paymentId: sanitized.paymentId }).lean();
       if (existing) {
@@ -52,27 +56,27 @@ async function ingestFailedPayment(req, res) {
       }
     }
 
-    // -- Step 3: Persist ----------------------------------------------------
     const transaction = await TransactionRecord.create({
       ...sanitized,
       state: 'FAILED_PAYMENT_INGESTED',
     });
 
     console.log(
-      `ðŸ“¥ Ingested: ${transaction._id} | ${transaction.customerName} | Rs.${transaction.originalAmount} | ${transaction.errorCode}`
+      `[Webhook] Ingested: ${transaction._id} | ${transaction.customerName} | Rs.${transaction.originalAmount} | ${transaction.errorCode}`
     );
 
-    // -- Step 4: Real-time broadcast ----------------------------------------
     const io = req.app.get('io');
     if (io) io.emit('txn:created', transaction);
 
-    // -- Step 5: Respond ----------------------------------------------------
+    // -- Day 2: Async Triage ------------------------------------------------
+    triageAndRoute(transaction).catch(err => 
+      console.error(`[Webhook] Triage failed for ${transaction._id}`, err)
+    );
+
     return res.status(201).json({ success: true, data: transaction });
 
   } catch (error) {
-    console.error('âŒ Webhook ingestion error:', error.message);
-
-    // Mongoose schema-level validation failures
+    console.error('[Webhook] ingestion error:', error.message);
     if (error.name === 'ValidationError') {
       return res.status(400).json({
         success: false,
@@ -90,9 +94,5 @@ async function ingestFailedPayment(req, res) {
     });
   }
 }
-
-// ---------------------------------------------------------------------------
-// Exports
-// ---------------------------------------------------------------------------
 
 module.exports = { ingestFailedPayment };
