@@ -1,0 +1,91 @@
+@import "tailwindcss";
+
+/* ──────────────────────────────────────────
+   RecoverPulse AI — Design System
+   Dark theme with pulse-red accent
+   ────────────────────────────────────────── */
+
+@theme {
+  --color-bg-primary: #0a0a0f;
+  --color-bg-secondary: #12121a;
+  --color-bg-card: #1a1a2e;
+  --color-bg-card-hover: #222240;
+  --color-bg-elevated: #252540;
+
+  --color-text-primary: #e8e8f0;
+  --color-text-secondary: #9090a8;
+  --color-text-muted: #606078;
+
+  --color-pulse-red: #ff3b5c;
+  --color-pulse-red-glow: #ff3b5c40;
+  --color-pulse-orange: #ff8c42;
+  --color-pulse-green: #00e676;
+  --color-pulse-blue: #448aff;
+  --color-pulse-purple: #7c4dff;
+  --color-pulse-yellow: #ffd740;
+
+  --color-border: #2a2a45;
+  --color-border-hover: #3a3a60;
+
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* ── Base ── */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-bg-secondary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-hover);
+}
+
+/* ── Pulse animation ── */
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 8px var(--color-pulse-red-glow); }
+  50% { box-shadow: 0 0 20px var(--color-pulse-red-glow), 0 0 40px var(--color-pulse-red-glow); }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
