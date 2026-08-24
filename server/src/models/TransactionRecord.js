@@ -1,21 +1,15 @@
 const mongoose = require('mongoose');
 
-// ────────────────────────────────────────────────
-// TransactionRecord — core entity for every failed payment
-// ────────────────────────────────────────────────
 const TransactionRecordSchema = new mongoose.Schema(
   {
-    // Customer info
     customerName: { type: String, required: true, trim: true },
-    phone: { type: String, required: true, trim: true },
-    email: { type: String, trim: true, lowercase: true },
+    phone:        { type: String, required: true, trim: true },
+    email:        { type: String, trim: true, lowercase: true },
 
-    // Payment info
     originalAmount: { type: Number, required: true },
-    currency: { type: String, default: 'INR', uppercase: true },
-    paymentId: { type: String, trim: true }, // external payment gateway ID
+    currency:       { type: String, default: 'INR', uppercase: true },
+    paymentId:      { type: String, trim: true },
 
-    // Error classification
     errorCode: { type: String, required: true, trim: true },
     errorCategory: {
       type: String,
@@ -23,7 +17,6 @@ const TransactionRecordSchema = new mongoose.Schema(
       default: null,
     },
 
-    // Finite State Machine state
     state: {
       type: String,
       enum: [
@@ -40,28 +33,21 @@ const TransactionRecordSchema = new mongoose.Schema(
       default: 'FAILED_PAYMENT_INGESTED',
     },
 
-    // Recovery tracking
-    promisedDate: { type: Date, default: null },
-    activePaymentLink: { type: String, default: null },
-    mandateId: { type: String, default: null },
-    settlementDiscountApplied: { type: Number, default: 0 },
+    promisedDate:               { type: Date,   default: null },
+    activePaymentLink:          { type: String, default: null },
+    mandateId:                  { type: String, default: null },
+    settlementDiscountApplied:  { type: Number, default: 0 },
+    escalationReason:           { type: String, default: null },
 
-    // Escalation
-    escalationReason: { type: String, default: null },
-
-    // Agent tracking
-    retryCount: { type: Number, default: 0 },
-    maxRetries: { type: Number, default: 3 },
-    outreachCount: { type: Number, default: 0 },
-    lastContactedAt: { type: Date, default: null },
-    recoveredAmount: { type: Number, default: 0 },
+    retryCount:       { type: Number, default: 0 },
+    maxRetries:       { type: Number, default: 3 },
+    outreachCount:    { type: Number, default: 0 },
+    lastContactedAt:  { type: Date,   default: null },
+    recoveredAmount:  { type: Number, default: 0 },
   },
-  {
-    timestamps: true, // auto-manages createdAt & updatedAt
-  }
+  { timestamps: true }
 );
 
-// Indexes for common queries
 TransactionRecordSchema.index({ state: 1 });
 TransactionRecordSchema.index({ phone: 1 });
 TransactionRecordSchema.index({ createdAt: -1 });

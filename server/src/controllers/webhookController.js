@@ -1,36 +1,29 @@
-﻿/**
- * @file controllers/webhookController.js
- * @description Handles ingestion of failed-payment webhook events.
- */
-
 'use strict';
 
-const TransactionRecord      = require('../models/TransactionRecord');
+const TransactionRecord = require('../models/TransactionRecord');
 const { validatePaymentPayload } = require('../middleware/validate');
 const { classifyErrorCode } = require('../services/triageService');
 const { getNextState } = require('../services/stateMachine');
 const { scheduleRetry } = require('../services/retryScheduler');
+const socket = require('../config/socket');
 
-/**
- * Triages the transaction asynchronously.
- */
 async function triageAndRoute(transaction) {
   try {
     const category = classifyErrorCode(transaction.errorCode);
     transaction.errorCategory = category;
 
     if (category === 'infra') {
-      // Infra -> Silent Retry Pipeline
       await transaction.save();
       await scheduleRetry(transaction, 1);
     } else {
-      // Soft / Hard -> Direct to Outreach
       transaction.state = getNextState(transaction.state, 'OUTREACH_INITIATED');
       await transaction.save();
-      console.log(`[Triage] Txn ${transaction._id} classified as ${category}. Moved to OUTREACH_INITIATED.`);
+      const io = socket.getIO();
+      if (io) io.emit('txn:updated', transaction.toObject());
+      console.log('[Triage]', transaction._id.toString(), '->', transaction.state);
     }
   } catch (err) {
-    console.error(`[Triage] Error triaging txn ${transaction._id}:`, err.message);
+    console.error('[Triage] failed for', transaction._id ? transaction._id.toString() : 'unknown', '-', err.message);
   }
 }
 
@@ -50,7 +43,7 @@ async function ingestFailedPayment(req, res) {
         return res.status(409).json({
           success: false,
           errorCode: 'DUPLICATE_PAYMENT_ID',
-          error: `A transaction with paymentId "${sanitized.paymentId}" already exists`,
+          error: 'A transaction with this paymentId already exists',
           existingTransactionId: existing._id,
         });
       }
@@ -61,22 +54,20 @@ async function ingestFailedPayment(req, res) {
       state: 'FAILED_PAYMENT_INGESTED',
     });
 
-    console.log(
-      `[Webhook] Ingested: ${transaction._id} | ${transaction.customerName} | Rs.${transaction.originalAmount} | ${transaction.errorCode}`
-    );
+    console.log('[Webhook] Ingested', transaction._id.toString(), transaction.customerName, transaction.errorCode);
 
-    const io = req.app.get('io');
-    if (io) io.emit('txn:created', transaction);
+    const io = socket.getIO();
+    if (io) io.emit('txn:created', transaction.toObject());
 
-    // -- Day 2: Async Triage ------------------------------------------------
-    triageAndRoute(transaction).catch(err => 
-      console.error(`[Webhook] Triage failed for ${transaction._id}`, err)
+    triageAndRoute(transaction).catch((err) =>
+      console.error('[Webhook] Triage dispatch failed:', err.message)
     );
 
     return res.status(201).json({ success: true, data: transaction });
 
   } catch (error) {
     console.error('[Webhook] ingestion error:', error.message);
+
     if (error.name === 'ValidationError') {
       return res.status(400).json({
         success: false,

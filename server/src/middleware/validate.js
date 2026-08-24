@@ -6,9 +6,7 @@
 
 'use strict';
 
-// ---------------------------------------------------------------------------
 // Constants
-// ---------------------------------------------------------------------------
 
 /** E.164 international phone format: +<country><subscriber>, 7-15 digits total */
 const PHONE_RE = /^\+[1-9]\d{6,14}$/;
@@ -22,9 +20,7 @@ const VALID_CURRENCIES = new Set(['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD']);
 /** Maximum accepted transaction amount (1 billion) */
 const MAX_AMOUNT = 1_000_000_000;
 
-// ---------------------------------------------------------------------------
 // Primitive helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Returns true when `v` is a non-empty string after trimming whitespace.
@@ -33,9 +29,7 @@ const MAX_AMOUNT = 1_000_000_000;
  */
 const isNonEmptyString = (v) => typeof v === 'string' && v.trim().length > 0;
 
-// ---------------------------------------------------------------------------
 // Payload validator
-// ---------------------------------------------------------------------------
 
 /**
  * Validates all fields of an incoming payment-failed webhook payload.
@@ -62,8 +56,7 @@ const isNonEmptyString = (v) => typeof v === 'string' && v.trim().length > 0;
 function validatePaymentPayload(body) {
   const { customerName, phone, email, originalAmount, currency, errorCode, paymentId } = body;
 
-  // -- 1. Required-field presence check ------------------------------------
-  const missingFields = [];
+    const missingFields = [];
   if (!isNonEmptyString(customerName)) missingFields.push('customerName');
   if (!isNonEmptyString(phone))        missingFields.push('phone');
   if (!isNonEmptyString(errorCode))    missingFields.push('errorCode');
@@ -80,8 +73,7 @@ function validatePaymentPayload(body) {
     };
   }
 
-  // -- 2. Phone format (E.164) ---------------------------------------------
-  if (!PHONE_RE.test(phone.trim())) {
+    if (!PHONE_RE.test(phone.trim())) {
     return {
       valid: false,
       status: 400,
@@ -90,8 +82,7 @@ function validatePaymentPayload(body) {
     };
   }
 
-  // -- 3. Email format (optional) ------------------------------------------
-  if (email && !EMAIL_RE.test(String(email).trim())) {
+    if (email && !EMAIL_RE.test(String(email).trim())) {
     return {
       valid: false,
       status: 400,
@@ -100,8 +91,7 @@ function validatePaymentPayload(body) {
     };
   }
 
-  // -- 4. Amount type & range ----------------------------------------------
-  const amount = Number(originalAmount);
+    const amount = Number(originalAmount);
   if (!Number.isFinite(amount)) {
     return {
       valid: false,
@@ -127,8 +117,7 @@ function validatePaymentPayload(body) {
     };
   }
 
-  // -- 5. Currency ---------------------------------------------------------
-  const resolvedCurrency = currency ? String(currency).toUpperCase().trim() : 'INR';
+    const resolvedCurrency = currency ? String(currency).toUpperCase().trim() : 'INR';
   if (!VALID_CURRENCIES.has(resolvedCurrency)) {
     return {
       valid: false,
@@ -138,8 +127,7 @@ function validatePaymentPayload(body) {
     };
   }
 
-  // -- All checks passed: return sanitized payload -------------------------
-  return {
+    return {
     valid: true,
     sanitized: {
       customerName:   customerName.trim(),
@@ -153,9 +141,7 @@ function validatePaymentPayload(body) {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Exports
-// ---------------------------------------------------------------------------
 
 module.exports = {
   PHONE_RE,
@@ -165,3 +151,4 @@ module.exports = {
   isNonEmptyString,
   validatePaymentPayload,
 };
+

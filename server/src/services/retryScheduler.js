@@ -1,63 +1,51 @@
-﻿/**
- * @file services/retryScheduler.js
- * @description Schedules and executes silent retries for infra errors.
- */
-
 'use strict';
 
 const TransactionRecord = require('../models/TransactionRecord');
 const { getNextState } = require('./stateMachine');
+const socket = require('../config/socket');
 
-/**
- * Schedules a silent retry attempt.
- * @param {object} transaction Mongoose document
- * @param {number} attempt Attempt number (1-based)
- */
-async function scheduleRetry(transaction, attempt = 1) {
+// Delay between retry attempts. Short in test mode, 2 min in production.
+const RETRY_DELAY_MS = process.env.NODE_ENV === 'test' ? 100 : 120_000;
+
+async function scheduleRetry(transaction, attempt) {
   try {
-    // Determine the next state (will throw if invalid)
-    let nextState;
     if (transaction.state === 'FAILED_PAYMENT_INGESTED') {
-       nextState = getNextState(transaction.state, 'RETRY_SCHEDULED');
-    } else {
-       // If already in SILENT_RETRY_SCHEDULED, stay in it
-       nextState = transaction.state;
+      transaction.state = getNextState(transaction.state, 'RETRY_SCHEDULED');
     }
-
-    transaction.state = nextState;
     transaction.retryCount = attempt;
     await transaction.save();
 
-    console.log(`[Retry] Txn ${transaction._id} scheduled for attempt ${attempt}/${transaction.maxRetries}`);
+    const io = socket.getIO();
+    if (io) io.emit('txn:updated', transaction.toObject());
 
-    // Fast delay for testing, otherwise use real business logic delays (e.g. 5 minutes)
-    const delayMs = process.env.NODE_ENV === 'test' ? 100 : 2000;
+    console.log('[Retry] Scheduled attempt', attempt, 'of', transaction.maxRetries, 'for', transaction._id.toString());
 
     setTimeout(async () => {
       try {
         const txn = await TransactionRecord.findById(transaction._id);
         if (!txn || txn.state !== 'SILENT_RETRY_SCHEDULED') return;
 
-        console.log(`[Retry] Executing attempt ${attempt} for Txn ${txn._id}`);
+        console.log('[Retry] Executing attempt', attempt, 'for', txn._id.toString());
 
-        // TODO (Day 6): Actual Razorpay API call here
-        // For Day 2, we simulate failure:
-        
+        // TODO Day 6: Replace with real Razorpay payment retry call here.
+        // For now we simulate the retry always failing so retries exhaust.
+
         if (attempt >= txn.maxRetries) {
-          console.log(`[Retry] Txn ${txn._id} retries exhausted. Escalating to outreach.`);
+          console.log('[Retry] Exhausted retries for', txn._id.toString(), '- escalating to outreach');
           txn.state = getNextState(txn.state, 'RETRY_EXHAUSTED');
           await txn.save();
+          const io = socket.getIO();
+          if (io) io.emit('txn:updated', txn.toObject());
         } else {
-          // Schedule next attempt
           await scheduleRetry(txn, attempt + 1);
         }
       } catch (err) {
-        console.error(`[Retry Error during execution] Txn ${transaction._id}:`, err.message);
+        console.error('[Retry] Execution error for', transaction._id.toString(), '-', err.message);
       }
-    }, delayMs);
+    }, RETRY_DELAY_MS);
 
   } catch (err) {
-    console.error(`[Retry Error scheduling] Txn ${transaction._id}:`, err.message);
+    console.error('[Retry] Scheduling error for', transaction._id.toString(), '-', err.message);
   }
 }
 
