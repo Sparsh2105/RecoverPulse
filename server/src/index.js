@@ -1,4 +1,4 @@
-﻿require('dotenv').config();
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -8,6 +8,7 @@ const connectDB = require('./config/db');
 
 const webhookRoutes = require('./routes/webhookRoutes');
 const transactionRoutes = require('./routes/transactionRoutes');
+const agentRoutes = require('./routes/agentRoutes');
 
 const app = express();
 const httpServer = createServer(app);
@@ -27,6 +28,7 @@ app.use(morgan('dev'));
 
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/transactions', transactionRoutes);
+app.use('/api/agent', agentRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({
