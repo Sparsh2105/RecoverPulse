@@ -19,7 +19,8 @@ const TRANSITIONS = {
     MANDATE_CREATED: 'MANDATE_PENDING_AUTH',
     DISCOUNT_APPLIED: 'DISCOUNT_GATED_LINK',
     STOPPING_RULE_HIT: 'STOPPING_RULE_TRIGGERED',
-    EXHAUSTED: 'RECOVERY_FAILED'
+    EXHAUSTED: 'RECOVERY_FAILED',
+    PAYMENT_CAPTURED: 'RECOVERED' // customer paid directly after outreach (before mandate/discount step)
   },
   MANDATE_PENDING_AUTH: {
     MANDATE_CREATED: 'MANDATE_PENDING_AUTH', // Self-transition if they update the date

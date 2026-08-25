@@ -21,6 +21,7 @@ npm-debug.log*
 # IDE
 .vscode/
 .idea/
+Interview_Guide.md
 
 # OS
 .DS_Store

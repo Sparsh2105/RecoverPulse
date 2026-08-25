@@ -16,6 +16,7 @@ const TransactionRecord   = require('../models/TransactionRecord');
 const ConversationMessage = require('../models/ConversationMessage');
 const { getNextState }    = require('./stateMachine');
 const { scheduleRetry }   = require('./retryScheduler');
+const razorpay            = require('../config/razorpay');
 
 // ---------------------------------------------------------------------------
 // Tool schemas (sent to Groq on every agent call)
@@ -173,28 +174,66 @@ async function executeTool(toolName, toolArgs, transaction) {
     }
 
     case 'generate_payment_link': {
-      // TODO Day 6: Replace with real Razorpay Payment Links API call.
-      const fakeLink = 'https://rzp.io/l/stub-' + transaction._id.toString().slice(-6);
-      transaction.activePaymentLink = fakeLink;
+      const link = await razorpay.paymentLink.create({
+        amount: Math.round(toolArgs.amount * 100), // amount in paise
+        currency: transaction.currency || 'INR',
+        accept_partial: false,
+        description: toolArgs.description || 'Payment Recovery',
+        reference_id: transaction._id.toString(), // To catch in webhook
+        customer: {
+          name: transaction.customerName,
+          contact: transaction.phone,
+          email: transaction.email || undefined,
+        },
+        notify: { sms: false, email: false }, // We handle our own WhatsApp notifications
+      });
+
+      transaction.activePaymentLink = link.short_url;
       await transaction.save();
-      console.log('[Tool] generate_payment_link -> stub link:', fakeLink);
+      console.log('[Tool] generate_payment_link -> real link:', link.short_url);
       return {
-        observation: 'Payment link generated: ' + fakeLink,
+        observation: 'Payment link generated: ' + link.short_url,
         stateChanged: false,
       };
     }
 
     case 'generate_upi_mandate': {
-      // TODO Day 6: Replace with real Razorpay Subscriptions API call.
-      const fakeMandateId = 'sub_stub_' + Date.now();
-      transaction.mandateId = fakeMandateId;
-      transaction.promisedDate = new Date(toolArgs.startDate);
+      const plan = await razorpay.plans.create({
+        period: 'monthly',
+        interval: 1,
+        item: {
+          name: 'Mandate - ' + transaction.customerName,
+          amount: Math.round(toolArgs.amount * 100),
+          currency: transaction.currency || 'INR',
+        }
+      });
+      
+      let startAt = Math.floor(new Date(toolArgs.startDate).getTime() / 1000);
+      const tomorrow = Math.floor(Date.now() / 1000) + 86400;
+      if (isNaN(startAt) || startAt < tomorrow) {
+        startAt = tomorrow; // Enforce minimum +24h start date for Razorpay subscriptions
+      }
+
+      const sub = await razorpay.subscriptions.create({
+        plan_id: plan.id,
+        total_count: 12,
+        start_at: startAt,
+        customer_notify: 0,
+        notes: {
+          transactionId: transaction._id.toString()
+        }
+      });
+
+      transaction.mandateId = sub.id;
+      transaction.promisedDate = new Date(startAt * 1000);
+      transaction.activePaymentLink = sub.short_url;
       const fromState = transaction.state;
       transaction.state = getNextState(transaction.state, 'MANDATE_CREATED');
       await transaction.save();
-      console.log('[Tool] generate_upi_mandate -> stub mandate:', fakeMandateId, 'start:', toolArgs.startDate);
+
+      console.log('[Tool] generate_upi_mandate -> mandate:', sub.id, 'start:', transaction.promisedDate);
       return {
-        observation: 'UPI mandate created (' + fakeMandateId + ') starting ' + toolArgs.startDate + '. Customer will be auto-charged.',
+        observation: 'UPI mandate created (' + sub.id + ') starting ' + transaction.promisedDate.toISOString().split('T')[0] + '. Link: ' + sub.short_url,
         stateChanged: true,
         fromState,
         toState: transaction.state,
@@ -202,18 +241,32 @@ async function executeTool(toolName, toolArgs, transaction) {
     }
 
     case 'apply_settlement_discount': {
-      // TODO Day 6: Replace with real Razorpay discounted payment link.
       const pct = Math.min(10, Math.max(5, toolArgs.discountPercent)); // enforce 5–10% hard cap
-      const discountedAmount = transaction.originalAmount * (1 - pct / 100);
+      const discountedAmount = Math.floor(transaction.originalAmount * (1 - pct / 100));
+
+      const link = await razorpay.paymentLink.create({
+        amount: discountedAmount * 100, // paise
+        currency: transaction.currency || 'INR',
+        accept_partial: false,
+        description: 'Settlement Offer - ' + pct + '% off',
+        reference_id: transaction._id.toString(),
+        customer: {
+          name: transaction.customerName,
+          contact: transaction.phone,
+          email: transaction.email || undefined,
+        },
+        notify: { sms: false, email: false },
+      });
+
       transaction.settlementDiscountApplied = pct;
-      const fakeLink = 'https://rzp.io/l/disc-' + transaction._id.toString().slice(-6);
-      transaction.activePaymentLink = fakeLink;
+      transaction.activePaymentLink = link.short_url;
       const fromState = transaction.state;
       transaction.state = getNextState(transaction.state, 'DISCOUNT_APPLIED');
       await transaction.save();
-      console.log('[Tool] apply_settlement_discount -> ' + pct + '% -> Rs.' + discountedAmount);
+      
+      console.log('[Tool] apply_settlement_discount -> ' + pct + '% -> Rs.' + discountedAmount, link.short_url);
       return {
-        observation: pct + '% discount applied. Discounted amount: Rs.' + discountedAmount + '. Link: ' + fakeLink,
+        observation: pct + '% discount applied. Discounted amount: Rs.' + discountedAmount + '. Link: ' + link.short_url,
         stateChanged: true,
         fromState,
         toState: transaction.state,

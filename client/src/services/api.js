@@ -45,6 +45,26 @@ const api = {
       body: JSON.stringify(payload),
     }),
 
+  // ── Razorpay simulation (Day 6 — simulates payment.captured webhook) ──
+  simulateRazorpayCapture: (transactionId, amount) =>
+    request('/webhooks/razorpay', {
+      method: 'POST',
+      body: JSON.stringify({
+        event: 'payment.captured',
+        payload: {
+          payment: {
+            entity: {
+              id:       'pay_test_' + Date.now(),
+              amount:   Math.round(amount * 100), // paise
+              currency: 'INR',
+              status:   'captured',
+              notes:    { transactionId },
+            },
+          },
+        },
+      }),
+    }),
+
   // ── Health ──
   healthCheck: () => request('/health'),
 };

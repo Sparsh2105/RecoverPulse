@@ -7,6 +7,7 @@ const { createServer } = require('http');
 const connectDB = require('./config/db');
 
 const webhookRoutes = require('./routes/webhookRoutes');
+const razorpayWebhookRoutes = require('./routes/razorpayWebhookRoutes');
 const transactionRoutes = require('./routes/transactionRoutes');
 const agentRoutes = require('./routes/agentRoutes');
 
@@ -27,6 +28,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));
 
 app.use('/api/webhooks', webhookRoutes);
+app.use('/api/webhooks', razorpayWebhookRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/agent', agentRoutes);
 
@@ -68,10 +70,14 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 5000;
 
+const { startPoller } = require('./services/razorpayPoller');
+
 const startServer = async () => {
   await connectDB();
   httpServer.listen(PORT, () => {
     console.log(`Server started on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
+    // Start polling Razorpay for payment captures (dev fallback — webhook handles this in prod)
+    startPoller();
   });
 };
 

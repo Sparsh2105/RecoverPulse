@@ -269,7 +269,14 @@ async function runAgentTurn(transactionId, inboundMessage) {
 
   console.log('[Agent] Turn complete. Tool:', toolName, '| Observation:', result.observation);
 
-  return { toolName, observation: result.observation, auditLogIds };
+  return {
+    toolName,
+    observation: result.observation,
+    auditLogIds,
+    // Surface the Razorpay link/mandate URL so the frontend can render a clickable link
+    paymentLink: updatedTxn.activePaymentLink || null,
+    mandateId:   updatedTxn.mandateId         || null,
+  };
 }
 
 module.exports = { runAgentTurn };

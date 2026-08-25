@@ -16,11 +16,11 @@ const STATE_COLORS = {
 
 // ── Quick-test message presets ──
 const TEST_MESSAGES = [
-  { label: 'UPI Mandate',   message: 'bhai salary 1st ko aayegi, tab pay kar dunga' },
-  { label: 'Pay Now',       message: 'okay bhai, pay karna chahta hoon abhi' },
-  { label: 'Discount',      message: 'poora amount afford nahi ho raha, kuch kam ho sakta hai?' },
+  { label: 'UPI Mandate',    message: 'bhai salary 1st ko aayegi, tab pay kar dunga' },
+  { label: 'Pay Now',        message: 'okay bhai, pay karna chahta hoon abhi' },
+  { label: 'Discount',       message: 'poora amount afford nahi ho raha, kuch kam ho sakta hai?' },
   { label: 'Dispute (STOP)', message: 'I already cancelled this, stop messaging me' },
-  { label: 'Legal Threat',  message: 'yeh fraud hai, main sue karunga tumhe' },
+  { label: 'Legal Threat',   message: 'yeh fraud hai, main sue karunga tumhe' },
 ];
 
 function StatCard({ label, value, accent = 'text-[var(--color-pulse-red)]' }) {
@@ -68,6 +68,7 @@ function AgentPanel({ txn, onClose }) {
   const [message, setMessage] = useState('');
   const [log, setLog] = useState([]);
   const [sending, setSending] = useState(false);
+  const [capturing, setCapturing] = useState(false);
   const logEndRef = useRef(null);
 
   useEffect(() => {
@@ -100,6 +101,10 @@ function AgentPanel({ txn, onClose }) {
         } else {
           addLog('agent', 'Tool: ' + d.toolName);
           addLog('observation', d.observation);
+          // Surface the Razorpay link as a separate clickable entry
+          if (d.paymentLink) {
+            addLog('link', d.paymentLink);
+          }
         }
       } else {
         addLog('error', data.error || 'Agent error');
@@ -111,12 +116,36 @@ function AgentPanel({ txn, onClose }) {
     }
   };
 
+  // Simulates the Razorpay payment.captured webhook — closes the recovery loop
+  const simulateCapture = async () => {
+    if (capturing) return;
+    setCapturing(true);
+    addLog('system', 'Simulating Razorpay payment.captured webhook...');
+    try {
+      const data = await api.simulateRazorpayCapture(txn._id, txn.originalAmount);
+      if (data.status === 'ok') {
+        addLog('recovered', `Payment captured! Rs.${data.amountRecovered?.toLocaleString('en-IN') ?? txn.originalAmount} recovered. State → RECOVERED`);
+      } else if (data.status === 'already_recovered') {
+        addLog('recovered', 'Transaction is already in RECOVERED state.');
+      } else {
+        addLog('error', 'Capture response: ' + JSON.stringify(data));
+      }
+    } catch (err) {
+      addLog('error', 'Capture failed: ' + err.message);
+    } finally {
+      setCapturing(false);
+    }
+  };
+
   const LOG_STYLES = {
     user:        'bg-blue-500/15 text-blue-300 self-end',
     agent:       'bg-[var(--color-bg-secondary)] text-[var(--color-text-primary)]',
     observation: 'bg-green-500/10 text-green-400 text-xs',
+    link:        'bg-blue-500/10 text-blue-300 border border-blue-500/30 text-xs',
     compliance:  'bg-amber-500/15 text-amber-400 border border-amber-500/30',
     error:       'bg-red-500/15 text-red-400',
+    system:      'bg-[var(--color-bg-elevated)] text-[var(--color-text-muted)] text-xs italic',
+    recovered:   'bg-green-500/20 text-green-300 border border-green-500/30 font-semibold',
   };
 
   const state = STATE_COLORS[txn.state] || { bg: 'bg-gray-500/20', text: 'text-gray-400', label: txn.state };
@@ -136,6 +165,16 @@ function AgentPanel({ txn, onClose }) {
               {'\u20B9'}{txn.originalAmount.toLocaleString('en-IN')} &bull; {txn.errorCode}
             </span>
           </div>
+          {txn.activePaymentLink && (
+            <a
+              href={txn.activePaymentLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 mt-2 text-xs text-blue-400 underline underline-offset-2 hover:text-blue-300 transition-colors break-all"
+            >
+              🔗 {txn.mandateId ? 'Mandate' : 'Payment'} Link: {txn.activePaymentLink}
+            </a>
+          )}
         </div>
         <button
           onClick={onClose}
@@ -162,6 +201,30 @@ function AgentPanel({ txn, onClose }) {
         </div>
       </div>
 
+      {/* Razorpay payment capture simulation */}
+      <div className="px-4 py-3 border-b border-[var(--color-border)]">
+        <p className="text-xs text-[var(--color-text-muted)] mb-2 uppercase tracking-wider">Razorpay</p>
+        <button
+          onClick={simulateCapture}
+          disabled={capturing || txn.state === 'RECOVERED' || txn.state === 'ESCALATED_TO_HUMAN'}
+          className="w-full px-3 py-2 rounded-lg text-xs font-semibold bg-green-500/15 text-green-400 border border-green-500/30 hover:bg-green-500/25 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+        >
+          {capturing ? (
+            <>
+              <div className="w-3 h-3 border border-green-400 border-t-transparent rounded-full animate-spin" />
+              Sending capture webhook...
+            </>
+          ) : txn.state === 'RECOVERED' ? (
+            '✓ Already Recovered'
+          ) : (
+            `⚡ Simulate payment.captured → RECOVERED (Rs.${txn.originalAmount?.toLocaleString('en-IN')})`
+          )}
+        </button>
+        <p className="text-xs text-[var(--color-text-muted)] mt-1.5">
+          Fires a fake Razorpay webhook to close the recovery loop without ngrok.
+        </p>
+      </div>
+
       {/* Log */}
       <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-2">
         {log.length === 0 && (
@@ -172,7 +235,18 @@ function AgentPanel({ txn, onClose }) {
         {log.map((entry, i) => (
           <div key={i} className={`rounded-lg px-3 py-2 max-w-[90%] ${LOG_STYLES[entry.type]}`}>
             <p className="text-xs opacity-60 mb-0.5">{entry.type.toUpperCase()} &bull; {entry.ts}</p>
-            <p className="text-sm leading-snug">{entry.text}</p>
+            {entry.type === 'link' ? (
+              <a
+                href={entry.text}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm underline underline-offset-2 break-all hover:text-blue-200 transition-colors"
+              >
+                🔗 {entry.text}
+              </a>
+            ) : (
+              <p className="text-sm leading-snug">{entry.text}</p>
+            )}
           </div>
         ))}
         {sending && (
@@ -205,7 +279,8 @@ function AgentPanel({ txn, onClose }) {
           </button>
         </div>
         <p className="text-xs text-[var(--color-text-muted)] mt-2">
-          Click a row to open this panel. State badge updates in real-time via Socket.IO.
+          Click a row to open this panel. Razorpay links appear as clickable URLs in the log.
+          Use "Simulate payment.captured" above to close the recovery loop without ngrok.
         </p>
       </div>
     </div>
@@ -268,11 +343,12 @@ function App() {
 
   const simulatePayment = async () => {
     const testPayloads = [
-      { customerName: 'Rahul Sharma', phone: '+919876543210', email: 'rahul@example.com', originalAmount: 4999,  errorCode: 'INSUFFICIENT_FUNDS' },
-      { customerName: 'Priya Patel',  phone: '+919123456789', email: 'priya@example.com', originalAmount: 12500, errorCode: 'BANK_SERVER_DOWN' },
-      { customerName: 'Amit Kumar',   phone: '+918765432109', email: 'amit@example.com',  originalAmount: 2999,  errorCode: 'CARD_EXPIRED' },
+      { customerName: 'Rahul Sharma', phone: '+919876543210', email: 'rahul@example.com', originalAmount: 4999,  errorCode: 'INSUFFICIENT_FUNDS',  note: 'soft decline' },
+      { customerName: 'Priya Patel',  phone: '+919123456789', email: 'priya@example.com', originalAmount: 12500, errorCode: 'BANK_SERVER_DOWN',     note: 'infra → silent retry' },
+      { customerName: 'Amit Kumar',   phone: '+918765432109', email: 'amit@example.com',  originalAmount: 2999,  errorCode: 'CARD_EXPIRED',          note: 'hard decline' },
+      { customerName: 'Sneha Reddy',  phone: '+917654321098', email: 'sneha@example.com', originalAmount: 7499,  errorCode: 'INSUFFICIENT_FUNDS',    note: 'soft decline' },
     ];
-    const payload = testPayloads[Math.floor(Math.random() * testPayloads.length)];
+    const { note, ...payload } = testPayloads[Math.floor(Math.random() * testPayloads.length)];
     try {
       await api.simulateFailedPayment(payload);
     } catch (err) {
