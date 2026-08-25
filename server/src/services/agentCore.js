@@ -20,6 +20,7 @@ const ConversationMessage = require('../models/ConversationMessage');
 const AgentAuditLog       = require('../models/AgentAuditLog');
 const socket              = require('../config/socket');
 const { TOOL_SCHEMAS, executeTool } = require('./agentTools');
+const { reviewAction } = require('./complianceCop');
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -204,8 +205,48 @@ async function runAgentTurn(transactionId, inboundMessage) {
   });
   auditLogIds.push(actionLog._id.toString());
 
-  // Step 5: Compliance cop placeholder (Day 5 will fill this in)
-  // TODO Day 5: Add second Groq call here to review outbound messages.
+  // Step 5: Compliance Cop — second independent Groq call reviews the action
+  const compliance = await reviewAction(toolName, toolArgs, txn);
+
+  const complianceLog = await logStep(transactionId, {
+    step: 'COMPLIANCE_CHECK',
+    toolName,
+    toolInput: toolArgs,
+    complianceVerified: compliance.approved,
+    complianceReason: compliance.reason || null,
+  });
+  auditLogIds.push(complianceLog._id.toString());
+
+  if (!compliance.approved) {
+    console.log('[Agent] Compliance rejected action', toolName, '-', compliance.reason);
+
+    // Block the action — escalate to human with the compliance reason
+    const fromState = txn.state;
+    if (txn.state === 'OUTREACH_INITIATED') txn.state = 'STOPPING_RULE_TRIGGERED';
+    txn.state = 'ESCALATED_TO_HUMAN';
+    txn.escalationReason = 'compliance_violation: ' + compliance.reason;
+    await txn.save();
+
+    const escalationLog = await logStep(transactionId, {
+      step: 'OBSERVATION',
+      toolName: 'escalate_to_human',
+      toolInput: { reason: txn.escalationReason },
+      toolOutput: { observation: 'Action blocked by compliance cop. Escalated to human.' },
+      fromState,
+      toState: txn.state,
+    });
+    auditLogIds.push(escalationLog._id.toString());
+
+    const io = socket.getIO();
+    if (io) io.emit('txn:updated', txn.toObject());
+
+    return {
+      toolName: 'escalate_to_human',
+      observation: 'Compliance rejected: ' + compliance.reason,
+      auditLogIds,
+      complianceBlocked: true,
+    };
+  }
 
   // Step 6: OBSERVATION — execute the tool
   const result = await executeTool(toolName, toolArgs, txn);

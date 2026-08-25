@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file services/stateMachine.js
  * @description Finite State Machine for transaction workflows.
  */
@@ -22,9 +22,15 @@ const TRANSITIONS = {
     EXHAUSTED: 'RECOVERY_FAILED'
   },
   MANDATE_PENDING_AUTH: {
+    MANDATE_CREATED: 'MANDATE_PENDING_AUTH', // Self-transition if they update the date
+    DISCOUNT_APPLIED: 'DISCOUNT_GATED_LINK', // Changed their mind to pay now with discount
+    STOPPING_RULE_HIT: 'STOPPING_RULE_TRIGGERED',
     PAYMENT_CAPTURED: 'RECOVERED'
   },
   DISCOUNT_GATED_LINK: {
+    MANDATE_CREATED: 'MANDATE_PENDING_AUTH', // Changed their mind to pay later via mandate
+    DISCOUNT_APPLIED: 'DISCOUNT_GATED_LINK', // Self-transition if discount is updated
+    STOPPING_RULE_HIT: 'STOPPING_RULE_TRIGGERED',
     PAYMENT_CAPTURED: 'RECOVERED'
   },
   STOPPING_RULE_TRIGGERED: {

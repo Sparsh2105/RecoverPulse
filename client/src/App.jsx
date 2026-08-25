@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import api from './services/api';
 import socket from './services/socket';
 
@@ -14,6 +14,15 @@ const STATE_COLORS = {
   ESCALATED_TO_HUMAN:       { bg: 'bg-amber-500/20',  text: 'text-amber-400',  label: 'Escalated' },
 };
 
+// ── Quick-test message presets ──
+const TEST_MESSAGES = [
+  { label: 'UPI Mandate',   message: 'bhai salary 1st ko aayegi, tab pay kar dunga' },
+  { label: 'Pay Now',       message: 'okay bhai, pay karna chahta hoon abhi' },
+  { label: 'Discount',      message: 'poora amount afford nahi ho raha, kuch kam ho sakta hai?' },
+  { label: 'Dispute (STOP)', message: 'I already cancelled this, stop messaging me' },
+  { label: 'Legal Threat',  message: 'yeh fraud hai, main sue karunga tumhe' },
+];
+
 function StatCard({ label, value, accent = 'text-[var(--color-pulse-red)]' }) {
   return (
     <div className="bg-[var(--color-bg-card)] border border-[var(--color-border)] rounded-xl p-5 hover:border-[var(--color-border-hover)] transition-all duration-300">
@@ -23,14 +32,21 @@ function StatCard({ label, value, accent = 'text-[var(--color-pulse-red)]' }) {
   );
 }
 
-function TransactionRow({ txn }) {
+function TransactionRow({ txn, onClick, isSelected }) {
   const state = STATE_COLORS[txn.state] || { bg: 'bg-gray-500/20', text: 'text-gray-400', label: txn.state };
   const time = new Date(txn.createdAt).toLocaleString('en-IN', {
     hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short',
   });
 
   return (
-    <tr className="border-b border-[var(--color-border)] hover:bg-[var(--color-bg-card-hover)] transition-colors duration-200">
+    <tr
+      onClick={onClick}
+      className={`border-b border-[var(--color-border)] cursor-pointer transition-colors duration-200 ${
+        isSelected
+          ? 'bg-blue-500/10 border-l-2 border-l-blue-400'
+          : 'hover:bg-[var(--color-bg-card-hover)]'
+      }`}
+    >
       <td className="py-3 px-4 text-sm font-medium">{txn.customerName}</td>
       <td className="py-3 px-4 text-sm text-[var(--color-text-secondary)] font-[var(--font-mono)]">{txn.phone}</td>
       <td className="py-3 px-4 text-sm font-semibold text-[var(--color-pulse-orange)] font-[var(--font-mono)]">
@@ -47,12 +63,162 @@ function TransactionRow({ txn }) {
   );
 }
 
+// ── Agent test panel (slide-in from right) ──
+function AgentPanel({ txn, onClose }) {
+  const [message, setMessage] = useState('');
+  const [log, setLog] = useState([]);
+  const [sending, setSending] = useState(false);
+  const logEndRef = useRef(null);
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [log]);
+
+  const addLog = (type, text) => {
+    setLog(prev => [...prev, { type, text, ts: new Date().toLocaleTimeString('en-IN') }]);
+  };
+
+  const send = async (msg) => {
+    const m = (msg || message).trim();
+    if (!m || sending) return;
+    setMessage('');
+    setSending(true);
+    addLog('user', m);
+
+    try {
+      const res = await fetch('/api/agent/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transactionId: txn._id, inboundMessage: m }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        const d = data.data;
+        if (d.complianceBlocked) {
+          addLog('compliance', 'BLOCKED by Compliance Cop: ' + d.observation);
+        } else {
+          addLog('agent', 'Tool: ' + d.toolName);
+          addLog('observation', d.observation);
+        }
+      } else {
+        addLog('error', data.error || 'Agent error');
+      }
+    } catch (err) {
+      addLog('error', err.message);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const LOG_STYLES = {
+    user:        'bg-blue-500/15 text-blue-300 self-end',
+    agent:       'bg-[var(--color-bg-secondary)] text-[var(--color-text-primary)]',
+    observation: 'bg-green-500/10 text-green-400 text-xs',
+    compliance:  'bg-amber-500/15 text-amber-400 border border-amber-500/30',
+    error:       'bg-red-500/15 text-red-400',
+  };
+
+  const state = STATE_COLORS[txn.state] || { bg: 'bg-gray-500/20', text: 'text-gray-400', label: txn.state };
+
+  return (
+    <div className="fixed top-0 right-0 h-full w-[420px] bg-[var(--color-bg-secondary)] border-l border-[var(--color-border)] flex flex-col z-50 shadow-2xl">
+      {/* Header */}
+      <div className="px-5 py-4 border-b border-[var(--color-border)] flex items-start justify-between">
+        <div>
+          <h3 className="font-semibold text-sm">{txn.customerName}</h3>
+          <p className="text-xs text-[var(--color-text-muted)] font-[var(--font-mono)] mt-0.5">{txn.phone}</p>
+          <div className="flex items-center gap-2 mt-2">
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${state.bg} ${state.text}`}>
+              {state.label}
+            </span>
+            <span className="text-xs text-[var(--color-text-muted)]">
+              {'\u20B9'}{txn.originalAmount.toLocaleString('en-IN')} &bull; {txn.errorCode}
+            </span>
+          </div>
+        </div>
+        <button
+          onClick={onClose}
+          className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] text-lg leading-none mt-1"
+        >
+          &times;
+        </button>
+      </div>
+
+      {/* Quick-test presets */}
+      <div className="px-4 py-3 border-b border-[var(--color-border)]">
+        <p className="text-xs text-[var(--color-text-muted)] mb-2 uppercase tracking-wider">Quick tests</p>
+        <div className="flex flex-wrap gap-1.5">
+          {TEST_MESSAGES.map(({ label, message: m }) => (
+            <button
+              key={label}
+              onClick={() => send(m)}
+              disabled={sending}
+              className="px-2.5 py-1 rounded-full text-xs font-medium bg-[var(--color-bg-card)] border border-[var(--color-border)] hover:border-[var(--color-border-hover)] disabled:opacity-40 transition-colors"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Log */}
+      <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-2">
+        {log.length === 0 && (
+          <p className="text-xs text-[var(--color-text-muted)] text-center mt-8">
+            Click a quick test or type a message to trigger the agent
+          </p>
+        )}
+        {log.map((entry, i) => (
+          <div key={i} className={`rounded-lg px-3 py-2 max-w-[90%] ${LOG_STYLES[entry.type]}`}>
+            <p className="text-xs opacity-60 mb-0.5">{entry.type.toUpperCase()} &bull; {entry.ts}</p>
+            <p className="text-sm leading-snug">{entry.text}</p>
+          </div>
+        ))}
+        {sending && (
+          <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+            <div className="w-3 h-3 border border-[var(--color-pulse-red)] border-t-transparent rounded-full animate-spin" />
+            Agent thinking...
+          </div>
+        )}
+        <div ref={logEndRef} />
+      </div>
+
+      {/* Input */}
+      <div className="px-4 py-3 border-t border-[var(--color-border)]">
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={message}
+            onChange={e => setMessage(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && send()}
+            placeholder="Type customer message..."
+            disabled={sending}
+            className="flex-1 bg-[var(--color-bg-card)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-hover)] disabled:opacity-40"
+          />
+          <button
+            onClick={() => send()}
+            disabled={!message.trim() || sending}
+            className="px-4 py-2 bg-gradient-to-r from-[var(--color-pulse-red)] to-[var(--color-pulse-orange)] text-white text-sm font-semibold rounded-lg hover:opacity-90 disabled:opacity-40 transition-opacity"
+          >
+            Send
+          </button>
+        </div>
+        <p className="text-xs text-[var(--color-text-muted)] mt-2">
+          Click a row to open this panel. State badge updates in real-time via Socket.IO.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [transactions, setTransactions] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [serverOnline, setServerOnline] = useState(false);
   const [error, setError] = useState(null);
+  const [selectedTxn, setSelectedTxn] = useState(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -74,7 +240,6 @@ function App() {
 
   useEffect(() => {
     fetchData();
-
     socket.connect();
 
     socket.on('connect', () => setServerOnline(true));
@@ -87,6 +252,8 @@ function App() {
 
     socket.on('txn:updated', (updatedTxn) => {
       setTransactions(prev => prev.map(t => t._id === updatedTxn._id ? updatedTxn : t));
+      // Also update the selected panel if it's the same transaction
+      setSelectedTxn(prev => prev && prev._id === updatedTxn._id ? updatedTxn : prev);
       api.getStats().then(res => setStats(res.data)).catch(console.error);
     });
 
@@ -114,8 +281,8 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[var(--color-bg-primary)]">
-      <header className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]/80 backdrop-blur-xl sticky top-0 z-50">
+    <div className={`min-h-screen bg-[var(--color-bg-primary)] transition-all ${selectedTxn ? 'pr-[420px]' : ''}`}>
+      <header className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]/80 backdrop-blur-xl sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div
@@ -159,34 +326,25 @@ function App() {
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <StatCard
-            label="Total Transactions"
-            value={stats?.totalTransactions ?? 0}
-            accent="text-[var(--color-text-primary)]"
-          />
-          <StatCard
-            label="Recovered"
-            value={stats?.recovered ?? 0}
-            accent="text-[var(--color-pulse-green)]"
-          />
-          <StatCard
-            label="Value at Risk"
-            value={`\u20B9${(stats?.grossValueAtRisk ?? 0).toLocaleString('en-IN')}`}
-            accent="text-[var(--color-pulse-red)]"
-          />
-          <StatCard
-            label="Recovery Rate"
-            value={`${stats?.recoveryRate ?? 0}%`}
-            accent="text-[var(--color-pulse-blue)]"
-          />
+          <StatCard label="Total Transactions" value={stats?.totalTransactions ?? 0} accent="text-[var(--color-text-primary)]" />
+          <StatCard label="Recovered"          value={stats?.recovered ?? 0}          accent="text-[var(--color-pulse-green)]" />
+          <StatCard label="Value at Risk"       value={`\u20B9${(stats?.grossValueAtRisk ?? 0).toLocaleString('en-IN')}`} accent="text-[var(--color-pulse-red)]" />
+          <StatCard label="Recovery Rate"       value={`${stats?.recoveryRate ?? 0}%`} accent="text-[var(--color-pulse-blue)]" />
         </div>
 
         <div className="bg-[var(--color-bg-card)] border border-[var(--color-border)] rounded-xl overflow-hidden">
           <div className="px-6 py-4 border-b border-[var(--color-border)] flex items-center justify-between">
             <h2 className="text-base font-semibold">Failed Payments</h2>
-            <span className="text-xs text-[var(--color-text-muted)] font-[var(--font-mono)]">
-              {transactions.length} records
-            </span>
+            <div className="flex items-center gap-3">
+              {selectedTxn && (
+                <span className="text-xs text-blue-400 font-[var(--font-mono)]">
+                  Agent panel open &rarr;
+                </span>
+              )}
+              <span className="text-xs text-[var(--color-text-muted)] font-[var(--font-mono)]">
+                {transactions.length} records &bull; click row to test agent
+              </span>
+            </div>
           </div>
 
           {loading ? (
@@ -213,7 +371,12 @@ function App() {
                 </thead>
                 <tbody>
                   {transactions.map((txn) => (
-                    <TransactionRow key={txn._id} txn={txn} />
+                    <TransactionRow
+                      key={txn._id}
+                      txn={txn}
+                      isSelected={selectedTxn?._id === txn._id}
+                      onClick={() => setSelectedTxn(prev => prev?._id === txn._id ? null : txn)}
+                    />
                   ))}
                 </tbody>
               </table>
@@ -221,6 +384,13 @@ function App() {
           )}
         </div>
       </main>
+
+      {selectedTxn && (
+        <AgentPanel
+          txn={selectedTxn}
+          onClose={() => setSelectedTxn(null)}
+        />
+      )}
     </div>
   );
 }
