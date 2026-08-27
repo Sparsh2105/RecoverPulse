@@ -38,8 +38,8 @@ async function logStep(transactionId, fields) {
   return AgentAuditLog.create({ transactionId, ...fields });
 }
 
-function buildSystemPrompt(txn) {
-  return [
+function buildSystemPrompt(txn, isInitialTrigger) {
+  const lines = [
     'You are RecoverPulse AI, an empathetic payment recovery agent for an Indian SaaS company.',
     'Your goal is to help customers resolve their failed payment in a way that works for both them and the business.',
     '',
@@ -51,17 +51,35 @@ function buildSystemPrompt(txn) {
     '  Current State: ' + txn.state,
     '  Retry Count: ' + txn.retryCount + '/' + txn.maxRetries,
     '',
-    'DECISION RULES (follow strictly):',
-    '  - If payment failed due to infra/bank error → use schedule_retry first.',
-    '  - If customer mentions a future date for payment → use generate_upi_mandate with that date.',
-    '  - If customer is ready to pay now → use generate_payment_link.',
-    '  - If customer says they cannot afford full amount → use apply_settlement_discount (5-10% only).',
-    '  - If customer disputes charge, threatens legal action, or asks to stop contact → use escalate_to_human immediately.',
-    '  - Always send a WhatsApp message to the customer after taking any action.',
-    '',
+  ];
+
+  if (isInitialTrigger) {
+    lines.push(
+      'ACTION REQUIRED: This is the FIRST contact with the customer. Their payment just failed.',
+      'You must call send_whatsapp_message to send a warm, empathetic opening message in Hinglish.',
+      'Mention the failed amount (Rs.' + txn.originalAmount + ') and ask how you can help.',
+      'Do NOT call generate_payment_link or generate_upi_mandate yet — wait for their reply.',
+      '',
+    );
+  } else {
+    lines.push(
+      'DECISION RULES (follow strictly):',
+      '  - If payment failed due to infra/bank error → use schedule_retry first.',
+      '  - If customer mentions a future date for payment → use generate_upi_mandate with that date.',
+      '  - If customer is ready to pay now → use generate_payment_link.',
+      '  - If customer says they cannot afford full amount → use apply_settlement_discount (5-10% only).',
+      '  - If customer disputes charge, threatens legal action, or asks to stop contact → use escalate_to_human immediately.',
+      '  - Always send a WhatsApp message to the customer after taking any action.',
+      '',
+    );
+  }
+
+  lines.push(
     'TONE: Friendly, empathetic, Hinglish (mix Hindi and English naturally). Never threatening. Keep messages under 300 chars.',
     'IMPORTANT: You MUST call exactly one tool. Do not respond with plain text.',
-  ].join('\n');
+  );
+
+  return lines.join('\n');
 }
 
 function buildConversationMessages(history, inboundMessage) {
@@ -146,8 +164,13 @@ async function runAgentTurn(transactionId, inboundMessage) {
   // Step 3: THOUGHT — call Groq LLM
   console.log('[Agent] Calling Groq for txn', transactionId, '| message:', inboundMessage);
 
-  const systemPrompt = buildSystemPrompt(txn);
-  const conversationHistory = buildConversationMessages(history, inboundMessage);
+  const isInitialTrigger = inboundMessage === 'PAYMENT_FAILED';
+  const systemPrompt = buildSystemPrompt(txn, isInitialTrigger);
+
+  // For initial trigger, don't include it as a user message — the system prompt already explains the context
+  const conversationHistory = isInitialTrigger
+    ? []
+    : buildConversationMessages(history, inboundMessage);
 
   let groqResponse;
   try {
@@ -155,7 +178,11 @@ async function runAgentTurn(transactionId, inboundMessage) {
       model: MODEL,
       messages: [
         { role: 'system', content: systemPrompt },
-        ...conversationHistory,
+        // For initial trigger, add a minimal user message so the model has something to respond to
+        ...(isInitialTrigger
+          ? [{ role: 'user', content: 'Payment failed. Start outreach.' }]
+          : conversationHistory
+        ),
       ],
       tools: TOOL_SCHEMAS,
       tool_choice: 'auto',
@@ -220,7 +247,40 @@ async function runAgentTurn(transactionId, inboundMessage) {
   if (!compliance.approved) {
     console.log('[Agent] Compliance rejected action', toolName, '-', compliance.reason);
 
-    // Block the action — escalate to human with the compliance reason
+    // Contact window violation — save message as queued, don't escalate
+    if (compliance.queued) {
+      console.log('[Agent] Contact window violation — saving message as queued, NOT escalating');
+
+      // Save the message as queued in conversation history so it's not lost
+      if (toolName === 'send_whatsapp_message' && toolArgs.message) {
+        const { ConversationMessage } = require('../models/ConversationMessage');
+        await require('../models/ConversationMessage').create({
+          transactionId,
+          direction:      'outbound',
+          channel:        'whatsapp',
+          body:           toolArgs.message,
+          deliveryStatus: 'queued',
+        });
+      }
+
+      const queueLog = await logStep(transactionId, {
+        step:              'COMPLIANCE_CHECK',
+        toolName,
+        toolInput:         toolArgs,
+        complianceVerified: false,
+        complianceReason:  compliance.reason,
+      });
+      auditLogIds.push(queueLog._id.toString());
+
+      return {
+        toolName,
+        observation: 'Message queued — will send when contact window opens (8AM-7PM IST). ' + compliance.reason,
+        auditLogIds,
+        complianceBlocked: false,  // not a hard block — transaction stays active
+      };
+    }
+
+    // Hard block (outreach cap, discount out of bounds, etc.) — escalate
     const fromState = txn.state;
     if (txn.state === 'OUTREACH_INITIATED') txn.state = 'STOPPING_RULE_TRIGGERED';
     txn.state = 'ESCALATED_TO_HUMAN';
@@ -269,11 +329,35 @@ async function runAgentTurn(transactionId, inboundMessage) {
 
   console.log('[Agent] Turn complete. Tool:', toolName, '| Observation:', result.observation);
 
+  // Step 8: Auto follow-up — if the tool generated a payment link/mandate,
+  // directly send a WhatsApp message with the link without another LLM call.
+  const LINK_TOOLS = new Set(['generate_payment_link', 'generate_upi_mandate', 'apply_settlement_discount']);
+  if (LINK_TOOLS.has(toolName) && updatedTxn.activePaymentLink) {
+    console.log('[Agent] Auto follow-up: sending WhatsApp with payment link...');
+    try {
+      const freshTxn = await TransactionRecord.findById(transactionId);
+      const linkMsg = toolName === 'generate_upi_mandate'
+        ? 'Link aa gaya! Mandate authorize karein: ' + updatedTxn.activePaymentLink +
+          '\n\nYeh ' + (updatedTxn.promisedDate
+            ? new Date(updatedTxn.promisedDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+            : 'scheduled date') + ' ko auto-debit ho jaayega. Koi dikkat? Hum yahan hain! 😊'
+        : toolName === 'apply_settlement_discount'
+          ? 'Special offer! Discounted payment link: ' + updatedTxn.activePaymentLink +
+            '\n\nAbhi pay karein — offer limited time ke liye hai! 🙏'
+          : 'Payment link ready hai: ' + updatedTxn.activePaymentLink +
+            '\n\nAbhi secure payment karein! 🙏';
+
+      await executeTool('send_whatsapp_message', { message: linkMsg }, freshTxn);
+      console.log('[Agent] Auto follow-up WhatsApp sent with link');
+    } catch (err) {
+      console.error('[Agent] Auto follow-up failed:', err.message);
+    }
+  }
+
   return {
     toolName,
     observation: result.observation,
     auditLogIds,
-    // Surface the Razorpay link/mandate URL so the frontend can render a clickable link
     paymentLink: updatedTxn.activePaymentLink || null,
     mandateId:   updatedTxn.mandateId         || null,
   };

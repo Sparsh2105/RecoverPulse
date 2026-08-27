@@ -17,6 +17,9 @@ const ConversationMessage = require('../models/ConversationMessage');
 const { getNextState }    = require('./stateMachine');
 const { scheduleRetry }   = require('./retryScheduler');
 const razorpay            = require('../config/razorpay');
+const { sendWhatsAppMessage, isWhatsAppConfigured } = require('../config/whatsapp');
+// Twilio kept as fallback — will be used if WhatsApp Cloud API not configured
+const { client: twilioClient, FROM_NUMBER, isTwilioConfigured } = require('../config/twilio');
 
 // ---------------------------------------------------------------------------
 // Tool schemas (sent to Groq on every agent call)
@@ -158,17 +161,81 @@ const TOOL_SCHEMAS = [
 async function executeTool(toolName, toolArgs, transaction) {
   switch (toolName) {
     case 'send_whatsapp_message': {
-      // TODO Day 7: Replace with real Twilio WhatsApp API call.
-      await ConversationMessage.create({
+      // Build the final message — append payment link if one exists
+      let body = toolArgs.message;
+      if (transaction.activePaymentLink) {
+        const linkLine = '\n\nPayment link: ' + transaction.activePaymentLink;
+        body = (body + linkLine).slice(0, 1500);
+      }
+
+      // Save to ConversationMessage regardless of channel availability
+      const msgRecord = await ConversationMessage.create({
         transactionId: transaction._id,
-        direction: 'outbound',
-        channel: 'whatsapp',
-        body: toolArgs.message,
+        direction:     'outbound',
+        channel:       'whatsapp',
+        body,
         deliveryStatus: 'queued',
       });
-      console.log('[Tool] send_whatsapp_message ->', toolArgs.message);
+
+      // Increment outreach count — compliance cop checks this cap
+      transaction.outreachCount   = (transaction.outreachCount || 0) + 1;
+      transaction.lastContactedAt = new Date();
+      await transaction.save();
+
+      // ── Try WhatsApp Cloud API (Meta) first — no ContentSid restriction ──
+      if (isWhatsAppConfigured()) {
+        try {
+          const { messageId } = await sendWhatsAppMessage(transaction.phone, body);
+          await ConversationMessage.findByIdAndUpdate(msgRecord._id, {
+            deliveryStatus:    'sent',
+            externalMessageId: messageId,
+          });
+          console.log('[Tool] send_whatsapp_message -> WhatsApp Cloud API | MsgId:', messageId, '| To:', transaction.phone);
+          return {
+            observation: 'WhatsApp message sent via Meta Cloud API to ' + transaction.phone + ' (ID: ' + messageId + ')',
+            stateChanged: false,
+          };
+        } catch (err) {
+          await ConversationMessage.findByIdAndUpdate(msgRecord._id, { deliveryStatus: 'failed' });
+          console.error('[Tool] WhatsApp Cloud API error:', err.message);
+          return {
+            observation: 'WhatsApp send failed (' + err.message + ') — message saved to conversation log only.',
+            stateChanged: false,
+          };
+        }
+      }
+
+      // ── Fallback: Twilio ──
+      if (isTwilioConfigured()) {
+        try {
+          const twilioMsg = await twilioClient.messages.create({
+            from: FROM_NUMBER,
+            to:   'whatsapp:' + transaction.phone,
+            body,
+          });
+          await ConversationMessage.findByIdAndUpdate(msgRecord._id, {
+            deliveryStatus:    'sent',
+            externalMessageId: twilioMsg.sid,
+          });
+          console.log('[Tool] send_whatsapp_message -> Twilio SID:', twilioMsg.sid, '| To:', transaction.phone);
+          return {
+            observation: 'WhatsApp message sent via Twilio to ' + transaction.phone + ' (SID: ' + twilioMsg.sid + ')',
+            stateChanged: false,
+          };
+        } catch (err) {
+          await ConversationMessage.findByIdAndUpdate(msgRecord._id, { deliveryStatus: 'failed' });
+          console.error('[Tool] send_whatsapp_message Twilio error:', err.message);
+          return {
+            observation: 'WhatsApp send failed (' + err.message + ') — message saved to conversation log only.',
+            stateChanged: false,
+          };
+        }
+      }
+
+      // ── Simulation mode — neither configured ──
+      console.log('[Tool] send_whatsapp_message [SIMULATED] ->', body);
       return {
-        observation: 'WhatsApp message queued for delivery to ' + transaction.phone,
+        observation: '[SIMULATED] WhatsApp message queued for delivery to ' + transaction.phone + '. Configure WHATSAPP_TOKEN + WHATSAPP_PHONE_ID to send for real.',
         stateChanged: false,
       };
     }

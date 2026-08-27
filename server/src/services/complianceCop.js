@@ -40,9 +40,12 @@ function checkHardRules(toolName, toolArgs, txn) {
   // Contact window — only allow messaging between 8 AM and 7 PM IST
   if (toolName === 'send_whatsapp_message') {
     const hour = getISTHour();
-    if (hour < CONTACT_WINDOW_START || hour >= CONTACT_WINDOW_END) {
+    const bypassWindow = process.env.BYPASS_CONTACT_WINDOW === 'true';
+
+    if (!bypassWindow && (hour < CONTACT_WINDOW_START || hour >= CONTACT_WINDOW_END)) {
       return {
         approved: false,
+        queued: true,  // ← signals "don't escalate, just defer"
         reason: 'contact_window_violation: messaging outside 8AM-7PM IST (current hour: ' + Math.floor(hour) + ')',
       };
     }
@@ -51,6 +54,7 @@ function checkHardRules(toolName, toolArgs, txn) {
     if ((txn.outreachCount || 0) >= MAX_OUTREACH_COUNT) {
       return {
         approved: false,
+        queued: false,
         reason: 'outreach_limit_exceeded: customer contacted ' + txn.outreachCount + ' times (max ' + MAX_OUTREACH_COUNT + ')',
       };
     }
@@ -62,6 +66,7 @@ function checkHardRules(toolName, toolArgs, txn) {
     if (typeof pct !== 'number' || pct < MIN_DISCOUNT_PCT || pct > MAX_DISCOUNT_PCT) {
       return {
         approved: false,
+        queued: false,
         reason: 'discount_out_of_bounds: ' + pct + '% is outside the allowed 5-10% range',
       };
     }
@@ -108,9 +113,12 @@ async function checkWithLLM(message, txn) {
     });
 
     const raw = (response.choices[0].message.content || '').trim();
+    if (!raw) return { approved: true }; // empty response — fail open
 
     // Strip any markdown code fences the model might add
     const clean = raw.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
+    if (!clean) return { approved: true };
+
     return JSON.parse(clean);
   } catch (err) {
     // If compliance check itself errors, fail safe — approve with warning

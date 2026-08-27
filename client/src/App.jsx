@@ -343,10 +343,9 @@ function App() {
 
   const simulatePayment = async () => {
     const testPayloads = [
-      { customerName: 'Rahul Sharma', phone: '+919876543210', email: 'rahul@example.com', originalAmount: 4999,  errorCode: 'INSUFFICIENT_FUNDS',  note: 'soft decline' },
-      { customerName: 'Priya Patel',  phone: '+919123456789', email: 'priya@example.com', originalAmount: 12500, errorCode: 'BANK_SERVER_DOWN',     note: 'infra → silent retry' },
-      { customerName: 'Amit Kumar',   phone: '+918765432109', email: 'amit@example.com',  originalAmount: 2999,  errorCode: 'CARD_EXPIRED',          note: 'hard decline' },
-      { customerName: 'Sneha Reddy',  phone: '+917654321098', email: 'sneha@example.com', originalAmount: 7499,  errorCode: 'INSUFFICIENT_FUNDS',    note: 'soft decline' },
+      { customerName: 'Sparsh',       phone: '+918954003032', email: 'sparsh@example.com',  originalAmount: 4999,  errorCode: 'INSUFFICIENT_FUNDS', note: 'YOUR phone — soft decline' },
+      { customerName: 'Rahul Sharma', phone: '+918954003032', email: 'rahul@example.com',   originalAmount: 12500, errorCode: 'BANK_SERVER_DOWN',    note: 'YOUR phone — infra retry' },
+      { customerName: 'Priya Patel',  phone: '+918954003032', email: 'priya@example.com',   originalAmount: 2999,  errorCode: 'CARD_EXPIRED',         note: 'YOUR phone — hard decline' },
     ];
     const { note, ...payload } = testPayloads[Math.floor(Math.random() * testPayloads.length)];
     try {

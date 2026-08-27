@@ -5,6 +5,7 @@ const { validatePaymentPayload } = require('../middleware/validate');
 const { classifyErrorCode } = require('../services/triageService');
 const { getNextState } = require('../services/stateMachine');
 const { scheduleRetry } = require('../services/retryScheduler');
+const { runAgentTurn } = require('../services/agentCore');
 const socket = require('../config/socket');
 
 async function triageAndRoute(transaction) {
@@ -16,11 +17,17 @@ async function triageAndRoute(transaction) {
       await transaction.save();
       await scheduleRetry(transaction, 1);
     } else {
+      // soft_decline or hard_decline — move to outreach and fire first agent turn
       transaction.state = getNextState(transaction.state, 'OUTREACH_INITIATED');
       await transaction.save();
+
       const io = socket.getIO();
       if (io) io.emit('txn:updated', transaction.toObject());
       console.log('[Triage]', transaction._id.toString(), '->', transaction.state);
+
+      // Automatically fire the first agent turn — sends the opening WhatsApp message
+      console.log('[Triage] Firing initial agent turn for', transaction._id.toString());
+      await runAgentTurn(transaction._id.toString(), 'PAYMENT_FAILED');
     }
   } catch (err) {
     console.error('[Triage] failed for', transaction._id ? transaction._id.toString() : 'unknown', '-', err.message);
