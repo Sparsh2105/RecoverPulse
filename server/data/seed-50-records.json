@@ -1,0 +1,452 @@
+[
+  {
+    "customerName": "Riya Das",
+    "phone": "+919869932816",
+    "email": "riya.das832@gmail.com",
+    "originalAmount": 3999,
+    "currency": "INR",
+    "errorCode": "INVALID_CARD",
+    "_scenario": "hard_decline"
+  },
+  {
+    "customerName": "Sunita Agarwal",
+    "phone": "+919654270528",
+    "email": "sunita.agarwal965@outlook.com",
+    "originalAmount": 3999,
+    "currency": "INR",
+    "errorCode": "CARD_EXPIRED",
+    "_scenario": "hard_decline"
+  },
+  {
+    "customerName": "Shreya Chopra",
+    "phone": "+919591318061",
+    "email": "shreya.chopra41@gmail.com",
+    "originalAmount": 899,
+    "currency": "INR",
+    "errorCode": "INSUFFICIENT_FUNDS",
+    "_scenario": "price_sensitive"
+  },
+  {
+    "customerName": "Shreya Reddy",
+    "phone": "+918710305758",
+    "email": "shreya.reddy47@rediffmail.com",
+    "originalAmount": 4999,
+    "currency": "INR",
+    "errorCode": "BANK_SERVER_DOWN",
+    "_scenario": "infra"
+  },
+  {
+    "customerName": "Sunita Patel",
+    "phone": "+919688501280",
+    "email": "sunita.patel742@gmail.com",
+    "originalAmount": 4999,
+    "currency": "INR",
+    "errorCode": "PAYMENT_DECLINED",
+    "_scenario": "dispute_likely"
+  },
+  {
+    "customerName": "Swati Malhotra",
+    "phone": "+919848364043",
+    "email": "swati.malhotra862@rediffmail.com",
+    "originalAmount": 2999,
+    "currency": "INR",
+    "errorCode": "CARD_EXPIRED",
+    "_scenario": "hard_decline"
+  },
+  {
+    "customerName": "Rohit Singh",
+    "phone": "+918725439093",
+    "email": "rohit.singh903@yahoo.com",
+    "originalAmount": 5999,
+    "currency": "INR",
+    "errorCode": "INSUFFICIENT_FUNDS",
+    "_scenario": "soft_decline"
+  },
+  {
+    "customerName": "Pooja Chopra",
+    "phone": "+918976117598",
+    "email": "pooja.chopra477@rediffmail.com",
+    "originalAmount": 1999,
+    "currency": "INR",
+    "errorCode": "INSUFFICIENT_FUNDS",
+    "_scenario": "soft_decline"
+  },
+  {
+    "customerName": "Shreya Malhotra",
+    "phone": "+919823929885",
+    "email": "shreya.malhotra300@hotmail.com",
+    "originalAmount": 4999,
+    "currency": "INR",
+    "errorCode": "PAYMENT_DECLINED",
+    "_scenario": "dispute_likely"
+  },
+  {
+    "customerName": "Pooja Bose",
+    "phone": "+918916977180",
+    "email": "pooja.bose247@outlook.com",
+    "originalAmount": 3499,
+    "currency": "INR",
+    "errorCode": "PAYMENT_DECLINED",
+    "_scenario": "soft_decline"
+  },
+  {
+    "customerName": "Rajesh Iyer",
+    "phone": "+919632594193",
+    "email": "rajesh.iyer819@yahoo.com",
+    "originalAmount": 4999,
+    "currency": "INR",
+    "errorCode": "INSUFFICIENT_FUNDS",
+    "_scenario": "soft_decline"
+  },
+  {
+    "customerName": "Suresh Shah",
+    "phone": "+918997814503",
+    "email": "suresh.shah809@gmail.com",
+    "originalAmount": 4999,
+    "currency": "INR",
+    "errorCode": "CARD_LOST",
+    "_scenario": "hard_decline"
+  },
+  {
+    "customerName": "Ajay Patel",
+    "phone": "+918778194157",
+    "email": "ajay.patel387@rediffmail.com",
+    "originalAmount": 1499,
+    "currency": "INR",
+    "errorCode": "INSUFFICIENT_FUNDS",
+    "_scenario": "soft_decline"
+  },
+  {
+    "customerName": "Rajesh Joshi",
+    "phone": "+918780631108",
+    "email": "rajesh.joshi152@gmail.com",
+    "originalAmount": 9999,
+    "currency": "INR",
+    "errorCode": "NETWORK_ERROR",
+    "_scenario": "infra"
+  },
+  {
+    "customerName": "Rahul Joshi",
+    "phone": "+918929402519",
+    "email": "rahul.joshi589@yahoo.com",
+    "originalAmount": 9999,
+    "currency": "INR",
+    "errorCode": "INVALID_CARD",
+    "_scenario": "hard_decline"
+  },
+  {
+    "customerName": "Nisha Iyer",
+    "phone": "+918973139937",
+    "email": "nisha.iyer455@yahoo.com",
+    "originalAmount": 2999,
+    "currency": "INR",
+    "errorCode": "PAYMENT_DECLINED",
+    "_scenario": "dispute_likely"
+  },
+  {
+    "customerName": "Ananya Gupta",
+    "phone": "+918816929417",
+    "email": "ananya.gupta559@outlook.com",
+    "originalAmount": 3999,
+    "currency": "INR",
+    "errorCode": "PAYMENT_DECLINED",
+    "_scenario": "soft_decline"
+  },
+  {
+    "customerName": "Swati Nair",
+    "phone": "+918839183410",
+    "email": "swati.nair528@outlook.com",
+    "originalAmount": 999,
+    "currency": "INR",
+    "errorCode": "PAYMENT_DECLINED",
+    "_scenario": "soft_decline"
+  },
+  {
+    "customerName": "Shreya Reddy",
+    "phone": "+919660573823",
+    "email": "shreya.reddy180@gmail.com",
+    "originalAmount": 9999,
+    "currency": "INR",
+    "errorCode": "INSUFFICIENT_FUNDS",
+    "_scenario": "soft_decline"
+  },
+  {
+    "customerName": "Riya Das",
+    "phone": "+918996402156",
+    "email": "riya.das634@outlook.com",
+    "originalAmount": 29999,
+    "currency": "INR",
+    "errorCode": "BANK_SERVER_DOWN",
+    "_scenario": "infra"
+  },
+  {
+    "customerName": "Manish Malhotra",
+    "phone": "+919647316998",
+    "email": "manish.malhotra41@yahoo.com",
+    "originalAmount": 5999,
+    "currency": "INR",
+    "errorCode": "CARD_LOST",
+    "_scenario": "hard_decline"
+  },
+  {
+    "customerName": "Amit Rao",
+    "phone": "+919786544795",
+    "email": "amit.rao175@outlook.com",
+    "originalAmount": 1999,
+    "currency": "INR",
+    "errorCode": "PAYMENT_DECLINED",
+    "_scenario": "soft_decline"
+  },
+  {
+    "customerName": "Pooja Gupta",
+    "phone": "+919637568338",
+    "email": "pooja.gupta141@outlook.com",
+    "originalAmount": 19999,
+    "currency": "INR",
+    "errorCode": "CARD_EXPIRED",
+    "_scenario": "hard_decline"
+  },
+  {
+    "customerName": "Meera Iyer",
+    "phone": "+918925761282",
+    "email": "meera.iyer749@yahoo.com",
+    "originalAmount": 3999,
+    "currency": "INR",
+    "errorCode": "PAYMENT_DECLINED",
+    "_scenario": "soft_decline"
+  },
+  {
+    "customerName": "Pooja Sharma",
+    "phone": "+919532309319",
+    "email": "pooja.sharma167@yahoo.com",
+    "originalAmount": 1999,
+    "currency": "INR",
+    "errorCode": "PAYMENT_DECLINED",
+    "_scenario": "soft_decline"
+  },
+  {
+    "customerName": "Rahul Gupta",
+    "phone": "+919533025945",
+    "email": "rahul.gupta735@yahoo.com",
+    "originalAmount": 999,
+    "currency": "INR",
+    "errorCode": "INSUFFICIENT_FUNDS",
+    "_scenario": "soft_decline"
+  },
+  {
+    "customerName": "Pallavi Joshi",
+    "phone": "+919754598735",
+    "email": "pallavi.joshi153@outlook.com",
+    "originalAmount": 4999,
+    "currency": "INR",
+    "errorCode": "PAYMENT_DECLINED",
+    "_scenario": "dispute_likely"
+  },
+  {
+    "customerName": "Vivek Pandey",
+    "phone": "+918937514057",
+    "email": "vivek.pandey259@rediffmail.com",
+    "originalAmount": 2999,
+    "currency": "INR",
+    "errorCode": "PAYMENT_DECLINED",
+    "_scenario": "dispute_likely"
+  },
+  {
+    "customerName": "Deepak Agarwal",
+    "phone": "+919631790633",
+    "email": "deepak.agarwal145@hotmail.com",
+    "originalAmount": 7999,
+    "currency": "INR",
+    "errorCode": "PAYMENT_DECLINED",
+    "_scenario": "soft_decline"
+  },
+  {
+    "customerName": "Divya Malhotra",
+    "phone": "+919521046559",
+    "email": "divya.malhotra149@hotmail.com",
+    "originalAmount": 5999,
+    "currency": "INR",
+    "errorCode": "PAYMENT_DECLINED",
+    "_scenario": "soft_decline"
+  },
+  {
+    "customerName": "Ajay Singh",
+    "phone": "+919827697055",
+    "email": "ajay.singh389@hotmail.com",
+    "originalAmount": 9999,
+    "currency": "INR",
+    "errorCode": "PAYMENT_GATEWAY_ERROR",
+    "_scenario": "infra"
+  },
+  {
+    "customerName": "Amit Patel",
+    "phone": "+918721481107",
+    "email": "amit.patel945@rediffmail.com",
+    "originalAmount": 12500,
+    "currency": "INR",
+    "errorCode": "GATEWAY_TIMEOUT",
+    "_scenario": "infra"
+  },
+  {
+    "customerName": "Neha Singh",
+    "phone": "+918946649993",
+    "email": "neha.singh261@hotmail.com",
+    "originalAmount": 5999,
+    "currency": "INR",
+    "errorCode": "PAYMENT_DECLINED",
+    "_scenario": "soft_decline"
+  },
+  {
+    "customerName": "Ananya Joshi",
+    "phone": "+918729557365",
+    "email": "ananya.joshi886@rediffmail.com",
+    "originalAmount": 12500,
+    "currency": "INR",
+    "errorCode": "GATEWAY_TIMEOUT",
+    "_scenario": "infra"
+  },
+  {
+    "customerName": "Riya Iyer",
+    "phone": "+919867127640",
+    "email": "riya.iyer33@gmail.com",
+    "originalAmount": 2499,
+    "currency": "INR",
+    "errorCode": "PAYMENT_DECLINED",
+    "_scenario": "soft_decline"
+  },
+  {
+    "customerName": "Divya Mishra",
+    "phone": "+919559720635",
+    "email": "divya.mishra848@gmail.com",
+    "originalAmount": 7999,
+    "currency": "INR",
+    "errorCode": "CARD_LOST",
+    "_scenario": "hard_decline"
+  },
+  {
+    "customerName": "Manish Pandey",
+    "phone": "+918774989007",
+    "email": "manish.pandey472@rediffmail.com",
+    "originalAmount": 12500,
+    "currency": "INR",
+    "errorCode": "GATEWAY_TIMEOUT",
+    "_scenario": "infra"
+  },
+  {
+    "customerName": "Ananya Agarwal",
+    "phone": "+919692857061",
+    "email": "ananya.agarwal686@yahoo.com",
+    "originalAmount": 9999,
+    "currency": "INR",
+    "errorCode": "PAYMENT_DECLINED",
+    "_scenario": "dispute_likely"
+  },
+  {
+    "customerName": "Ajay Singh",
+    "phone": "+919544563823",
+    "email": "ajay.singh853@outlook.com",
+    "originalAmount": 19999,
+    "currency": "INR",
+    "errorCode": "INVALID_CARD",
+    "_scenario": "hard_decline"
+  },
+  {
+    "customerName": "Rajesh Shah",
+    "phone": "+919783902326",
+    "email": "rajesh.shah318@rediffmail.com",
+    "originalAmount": 14999,
+    "currency": "INR",
+    "errorCode": "CARD_EXPIRED",
+    "_scenario": "hard_decline"
+  },
+  {
+    "customerName": "Vikram Joshi",
+    "phone": "+919743645803",
+    "email": "vikram.joshi608@gmail.com",
+    "originalAmount": 1499,
+    "currency": "INR",
+    "errorCode": "PAYMENT_DECLINED",
+    "_scenario": "soft_decline"
+  },
+  {
+    "customerName": "Rajesh Agarwal",
+    "phone": "+918839065594",
+    "email": "rajesh.agarwal466@outlook.com",
+    "originalAmount": 4999,
+    "currency": "INR",
+    "errorCode": "PAYMENT_DECLINED",
+    "_scenario": "soft_decline"
+  },
+  {
+    "customerName": "Priya Verma",
+    "phone": "+919528966170",
+    "email": "priya.verma505@rediffmail.com",
+    "originalAmount": 9999,
+    "currency": "INR",
+    "errorCode": "INSUFFICIENT_FUNDS",
+    "_scenario": "soft_decline"
+  },
+  {
+    "customerName": "Shreya Gupta",
+    "phone": "+919832402319",
+    "email": "shreya.gupta91@outlook.com",
+    "originalAmount": 799,
+    "currency": "INR",
+    "errorCode": "INSUFFICIENT_FUNDS",
+    "_scenario": "price_sensitive"
+  },
+  {
+    "customerName": "Nikhil Verma",
+    "phone": "+918762381740",
+    "email": "nikhil.verma554@hotmail.com",
+    "originalAmount": 24999,
+    "currency": "INR",
+    "errorCode": "BANK_SERVER_DOWN",
+    "_scenario": "infra"
+  },
+  {
+    "customerName": "Priya Nair",
+    "phone": "+919757682114",
+    "email": "priya.nair345@rediffmail.com",
+    "originalAmount": 1499,
+    "currency": "INR",
+    "errorCode": "INSUFFICIENT_FUNDS",
+    "_scenario": "soft_decline"
+  },
+  {
+    "customerName": "Vivek Shah",
+    "phone": "+918771724193",
+    "email": "vivek.shah543@gmail.com",
+    "originalAmount": 2499,
+    "currency": "INR",
+    "errorCode": "INSUFFICIENT_FUNDS",
+    "_scenario": "soft_decline"
+  },
+  {
+    "customerName": "Sneha Bose",
+    "phone": "+918944655482",
+    "email": "sneha.bose727@rediffmail.com",
+    "originalAmount": 599,
+    "currency": "INR",
+    "errorCode": "INSUFFICIENT_FUNDS",
+    "_scenario": "price_sensitive"
+  },
+  {
+    "customerName": "Rohit Shah",
+    "phone": "+919715200674",
+    "email": "rohit.shah157@gmail.com",
+    "originalAmount": 999,
+    "currency": "INR",
+    "errorCode": "INSUFFICIENT_FUNDS",
+    "_scenario": "soft_decline"
+  },
+  {
+    "customerName": "Meera Das",
+    "phone": "+918874798531",
+    "email": "meera.das737@outlook.com",
+    "originalAmount": 999,
+    "currency": "INR",
+    "errorCode": "INSUFFICIENT_FUNDS",
+    "_scenario": "price_sensitive"
+  }
+]

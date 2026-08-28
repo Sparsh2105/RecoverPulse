@@ -54,13 +54,24 @@ function buildSystemPrompt(txn, isInitialTrigger) {
   ];
 
   if (isInitialTrigger) {
-    lines.push(
-      'ACTION REQUIRED: This is the FIRST contact with the customer. Their payment just failed.',
-      'You must call send_whatsapp_message to send a warm, empathetic opening message in Hinglish.',
-      'Mention the failed amount (Rs.' + txn.originalAmount + ') and ask how you can help.',
-      'Do NOT call generate_payment_link or generate_upi_mandate yet — wait for their reply.',
-      '',
-    );
+    const isHardDecline = ['CARD_EXPIRED', 'CARD_BLOCKED', 'INVALID_CARD', 'CARD_LOST', 'CARD_STOLEN'].includes(txn.errorCode);
+    if (isHardDecline && txn.email) {
+      lines.push(
+        'ACTION REQUIRED: This is the FIRST contact. Payment failed due to ' + txn.errorCode + ' — this is a card credential issue.',
+        'Call send_email FIRST to send an HTML payment recovery email to ' + txn.email + '.',
+        'Subject should be clear e.g. "Action Required: Update your card for ₹' + txn.originalAmount + ' payment".',
+        'After sending email, the system will auto-send a WhatsApp notification too.',
+        '',
+      );
+    } else {
+      lines.push(
+        'ACTION REQUIRED: This is the FIRST contact with the customer. Their payment just failed.',
+        'You must call send_whatsapp_message to send a warm, empathetic opening message in Hinglish.',
+        'Mention the failed amount (Rs.' + txn.originalAmount + ') and ask how you can help.',
+        'Do NOT call generate_payment_link or generate_upi_mandate yet — wait for their reply.',
+        '',
+      );
+    }
   } else {
     lines.push(
       'DECISION RULES (follow strictly):',
@@ -68,6 +79,7 @@ function buildSystemPrompt(txn, isInitialTrigger) {
       '  - If customer mentions a future date for payment → use generate_upi_mandate with that date.',
       '  - If customer is ready to pay now → use generate_payment_link.',
       '  - If customer says they cannot afford full amount → use apply_settlement_discount (5-10% only).',
+      '  - If error is CARD_EXPIRED, CARD_BLOCKED, INVALID_CARD, CARD_LOST → use send_email to send credential-update reminder (if email exists), then send_whatsapp_message.',
       '  - If customer disputes charge, threatens legal action, or asks to stop contact → use escalate_to_human immediately.',
       '  - Always send a WhatsApp message to the customer after taking any action.',
       '',
@@ -351,6 +363,19 @@ async function runAgentTurn(transactionId, inboundMessage) {
       console.log('[Agent] Auto follow-up WhatsApp sent with link');
     } catch (err) {
       console.error('[Agent] Auto follow-up failed:', err.message);
+    }
+  }
+
+  // Auto follow-up after send_email — notify on WhatsApp to check inbox
+  if (toolName === 'send_email' && updatedTxn.email) {
+    try {
+      const freshTxn = await TransactionRecord.findById(transactionId);
+      const notifyMsg = 'Aapke email (' + updatedTxn.email.split('@')[0] + '@...) pe payment link bhej diya hai. ' +
+        'Email check karein aur apna card update karein. Koi help? Hum yahan hain! 😊';
+      await executeTool('send_whatsapp_message', { message: notifyMsg }, freshTxn);
+      console.log('[Agent] Auto follow-up WhatsApp sent after email');
+    } catch (err) {
+      console.error('[Agent] Email follow-up WhatsApp failed:', err.message);
     }
   }
 

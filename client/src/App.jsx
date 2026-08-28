@@ -294,6 +294,8 @@ function App() {
   const [serverOnline, setServerOnline] = useState(false);
   const [error, setError] = useState(null);
   const [selectedTxn, setSelectedTxn] = useState(null);
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchProgress, setBatchProgress] = useState(null); // { processed, total, success, failed }
 
   const fetchData = useCallback(async () => {
     try {
@@ -332,20 +334,50 @@ function App() {
       api.getStats().then(res => setStats(res.data)).catch(console.error);
     });
 
+    socket.on('batch:started', () => {
+      setBatchRunning(true);
+      setBatchProgress({ processed: 0, total: 0, success: 0, failed: 0 });
+    });
+    socket.on('batch:progress', (p) => {
+      setBatchProgress(p);
+      if (p.processed % 5 === 0) api.getStats().then(res => setStats(res.data)).catch(console.error);
+    });
+    socket.on('batch:completed', (p) => {
+      setBatchRunning(false);
+      setBatchProgress(p);
+      api.getStats().then(res => setStats(res.data)).catch(console.error);
+    });
+    socket.on('batch:error', () => setBatchRunning(false));
+
     return () => {
       socket.off('connect');
       socket.off('disconnect');
       socket.off('txn:created');
       socket.off('txn:updated');
+      socket.off('batch:started');
+      socket.off('batch:progress');
+      socket.off('batch:completed');
+      socket.off('batch:error');
       socket.disconnect();
     };
   }, [fetchData]);
+
+  const runBatch = async () => {
+    if (batchRunning) return;
+    try {
+      await api.runBatch({ speedMultiplier: 10, concurrency: 5 });
+      // Response is immediate — progress streams via socket events
+    } catch (err) {
+      setError(err.message);
+      setBatchRunning(false);
+    }
+  };
 
   const simulatePayment = async () => {
     const testPayloads = [
       { customerName: 'Sparsh',       phone: '+918954003032', email: 'sparsh@example.com',  originalAmount: 4999,  errorCode: 'INSUFFICIENT_FUNDS', note: 'YOUR phone — soft decline' },
       { customerName: 'Rahul Sharma', phone: '+918954003032', email: 'rahul@example.com',   originalAmount: 12500, errorCode: 'BANK_SERVER_DOWN',    note: 'YOUR phone — infra retry' },
-      { customerName: 'Priya Patel',  phone: '+918954003032', email: 'priya@example.com',   originalAmount: 2999,  errorCode: 'CARD_EXPIRED',         note: 'YOUR phone — hard decline' },
+      { customerName: 'Priya Patel',  phone: '+918954003032', email: 'sparshchaudhary.jee@gmail.com',   originalAmount: 2999,  errorCode: 'CARD_EXPIRED',         note: 'YOUR phone — hard decline' },
     ];
     const { note, ...payload } = testPayloads[Math.floor(Math.random() * testPayloads.length)];
     try {
@@ -383,6 +415,18 @@ function App() {
               {serverOnline ? 'Server Online' : 'Server Offline'}
             </div>
             <button
+              onClick={runBatch}
+              disabled={!serverOnline || batchRunning}
+              className="px-4 py-2 bg-[var(--color-bg-card)] border border-[var(--color-border)] text-[var(--color-text-primary)] text-sm font-semibold rounded-lg hover:border-[var(--color-border-hover)] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {batchRunning ? (
+                <>
+                  <div className="w-3 h-3 border border-[var(--color-pulse-blue)] border-t-transparent rounded-full animate-spin" />
+                  {batchProgress ? `${batchProgress.processed}/${batchProgress.total}` : 'Starting...'}
+                </>
+              ) : '⚡ Run Batch (50)'}
+            </button>
+            <button
               onClick={simulatePayment}
               disabled={!serverOnline}
               className="px-4 py-2 bg-gradient-to-r from-[var(--color-pulse-red)] to-[var(--color-pulse-orange)] text-white text-sm font-semibold rounded-lg hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-[var(--color-pulse-red-glow)]"
@@ -397,6 +441,31 @@ function App() {
         {error && (
           <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
             {error}
+          </div>
+        )}
+
+        {/* Batch progress bar */}
+        {batchProgress && (
+          <div className="mb-6 p-4 rounded-xl bg-[var(--color-bg-card)] border border-[var(--color-border)]">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-[var(--color-text-primary)]">
+                {batchRunning ? '⚡ Batch Running...' : '✅ Batch Complete'}
+              </span>
+              <span className="text-xs font-[var(--font-mono)] text-[var(--color-text-muted)]">
+                {batchProgress.processed}/{batchProgress.total} · ✓ {batchProgress.success} · ✗ {batchProgress.failed}
+              </span>
+            </div>
+            <div className="w-full bg-[var(--color-bg-secondary)] rounded-full h-2 overflow-hidden">
+              <div
+                className="h-2 rounded-full transition-all duration-300"
+                style={{
+                  width: batchProgress.total ? `${(batchProgress.processed / batchProgress.total) * 100}%` : '0%',
+                  background: batchRunning
+                    ? 'linear-gradient(90deg, var(--color-pulse-blue), var(--color-pulse-purple))'
+                    : 'var(--color-pulse-green)',
+                }}
+              />
+            </div>
           </div>
         )}
 

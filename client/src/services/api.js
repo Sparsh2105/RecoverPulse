@@ -65,6 +65,13 @@ const api = {
       }),
     }),
 
+  // ── Batch runner (Day 8) ──
+  runBatch: (options = {}) =>
+    request('/batch/run', {
+      method: 'POST',
+      body: JSON.stringify(options),
+    }),
+
   // ── Health ──
   healthCheck: () => request('/health'),
 };

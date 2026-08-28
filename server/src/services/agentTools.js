@@ -18,8 +18,8 @@ const { getNextState }    = require('./stateMachine');
 const { scheduleRetry }   = require('./retryScheduler');
 const razorpay            = require('../config/razorpay');
 const { sendWhatsAppMessage, isWhatsAppConfigured } = require('../config/whatsapp');
-// Twilio kept as fallback — will be used if WhatsApp Cloud API not configured
 const { client: twilioClient, FROM_NUMBER, isTwilioConfigured } = require('../config/twilio');
+const { sendRecoveryEmail } = require('./emailService');
 
 // ---------------------------------------------------------------------------
 // Tool schemas (sent to Groq on every agent call)
@@ -141,6 +141,23 @@ const TOOL_SCHEMAS = [
           },
         },
         required: ['reason'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'send_email',
+      description: 'Sends a payment recovery email to the customer. Use for hard-decline errors (CARD_EXPIRED, CARD_BLOCKED, INVALID_CARD) where the customer needs to update their payment credentials. Email includes a payment link.',
+      parameters: {
+        type: 'object',
+        properties: {
+          subject: {
+            type: 'string',
+            description: 'Email subject line. Keep it clear and non-threatening.',
+          },
+        },
+        required: ['subject'],
       },
     },
   },
@@ -374,6 +391,50 @@ async function executeTool(toolName, toolArgs, transaction) {
         observation: 'Unknown tool: ' + toolName,
         stateChanged: false,
       };
+
+    case 'send_email': {
+      if (!transaction.email) {
+        return {
+          observation: 'Cannot send email — no email address on transaction record.',
+          stateChanged: false,
+        };
+      }
+
+      // If no payment link exists yet, generate one first so the email has a clickable button
+      if (!transaction.activePaymentLink) {
+        try {
+          const link = await razorpay.paymentLink.create({
+            amount:         Math.round(transaction.originalAmount * 100),
+            currency:       transaction.currency || 'INR',
+            accept_partial: false,
+            description:    'Payment Recovery — update card details',
+            reference_id:   transaction._id.toString(),
+            customer: {
+              name:    transaction.customerName,
+              contact: transaction.phone,
+              email:   transaction.email,
+            },
+            notify: { sms: false, email: false },
+          });
+          transaction.activePaymentLink = link.short_url;
+          await transaction.save();
+          console.log('[Tool] send_email — generated payment link for email:', link.short_url);
+        } catch (err) {
+          console.warn('[Tool] send_email — could not generate payment link:', err.message);
+          // Proceed anyway — email will have no link button but will still be useful
+        }
+      }
+
+      const result = await sendRecoveryEmail(transaction, toolArgs.subject);
+      console.log('[Tool] send_email ->', result.success ? 'sent ' + result.messageId : 'failed ' + result.error);
+      return {
+        observation: result.success
+          ? 'Recovery email sent to ' + transaction.email + ' (ID: ' + result.messageId + ')' +
+            (transaction.activePaymentLink ? ' with payment link: ' + transaction.activePaymentLink : '')
+          : 'Email send failed: ' + result.error,
+        stateChanged: false,
+      };
+    }
   }
 }
 

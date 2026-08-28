@@ -10,6 +10,7 @@ const webhookRoutes = require('./routes/webhookRoutes');
 const razorpayWebhookRoutes = require('./routes/razorpayWebhookRoutes');
 const transactionRoutes = require('./routes/transactionRoutes');
 const agentRoutes = require('./routes/agentRoutes');
+const batchRoutes = require('./routes/batchRoutes');
 
 const app = express();
 const httpServer = createServer(app);
@@ -36,6 +37,7 @@ app.use('/api/webhooks', webhookRoutes);
 app.use('/api/webhooks', razorpayWebhookRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/agent', agentRoutes);
+app.use('/api/batch', batchRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({
