@@ -1,83 +1,539 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  LayoutDashboard, List, Activity, BarChart2, X, Send,
+  ChevronRight, CheckCircle2, TrendingUp, TrendingDown,
+  Zap, Wifi, WifiOff, Shield, Brain, Eye, AlertTriangle,
+  MessageSquare, Clock, DollarSign, Percent, ArrowRight,
+  RefreshCw, UserCheck, XCircle, CheckCircle, Info,
+} from 'lucide-react';
 import api from './services/api';
 import socket from './services/socket';
 
+// ─────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────
 const STATE_COLORS = {
-  FAILED_PAYMENT_INGESTED:  { bg: 'bg-red-500/20',    text: 'text-red-400',    label: 'Ingested' },
-  SILENT_RETRY_SCHEDULED:   { bg: 'bg-yellow-500/20', text: 'text-yellow-400', label: 'Retrying' },
-  OUTREACH_INITIATED:       { bg: 'bg-blue-500/20',   text: 'text-blue-400',   label: 'Outreach' },
-  MANDATE_PENDING_AUTH:     { bg: 'bg-purple-500/20', text: 'text-purple-400', label: 'Mandate Pending' },
-  DISCOUNT_GATED_LINK:      { bg: 'bg-orange-500/20', text: 'text-orange-400', label: 'Discount Sent' },
-  STOPPING_RULE_TRIGGERED:  { bg: 'bg-red-600/20',    text: 'text-red-500',    label: 'Stopped' },
-  RECOVERY_FAILED:          { bg: 'bg-gray-500/20',   text: 'text-gray-400',   label: 'Failed' },
-  RECOVERED:                { bg: 'bg-green-500/20',  text: 'text-green-400',  label: 'Recovered' },
-  ESCALATED_TO_HUMAN:       { bg: 'bg-amber-500/20',  text: 'text-amber-400',  label: 'Escalated' },
+  FAILED_PAYMENT_INGESTED:  { bg: 'bg-red-500/10',    text: 'text-red-400',    dot: '#f87171', label: 'Ingested',        pipeline: 'FAILED' },
+  SILENT_RETRY_SCHEDULED:   { bg: 'bg-yellow-500/10', text: 'text-yellow-400', dot: '#facc15', label: 'Retrying',        pipeline: 'TRIAGED' },
+  OUTREACH_INITIATED:       { bg: 'bg-blue-500/10',   text: 'text-blue-400',   dot: '#60a5fa', label: 'Outreach',        pipeline: 'OUTREACH' },
+  MANDATE_PENDING_AUTH:     { bg: 'bg-purple-500/10', text: 'text-purple-400', dot: '#c084fc', label: 'Mandate Pending', pipeline: 'NEGOTIATION' },
+  DISCOUNT_GATED_LINK:      { bg: 'bg-orange-500/10', text: 'text-orange-400', dot: '#fb923c', label: 'Discount Sent',   pipeline: 'NEGOTIATION' },
+  STOPPING_RULE_TRIGGERED:  { bg: 'bg-red-600/10',    text: 'text-red-500',    dot: '#ef4444', label: 'Stopped',         pipeline: 'FAILED' },
+  RECOVERY_FAILED:          { bg: 'bg-gray-500/10',   text: 'text-gray-400',   dot: '#6b7280', label: 'Failed',          pipeline: 'FAILED' },
+  RECOVERED:                { bg: 'bg-emerald-500/10',text: 'text-emerald-400',dot: '#34d399', label: 'Recovered',       pipeline: 'RECOVERED' },
+  ESCALATED_TO_HUMAN:       { bg: 'bg-amber-500/10',  text: 'text-amber-400',  dot: '#fbbf24', label: 'Escalated',       pipeline: 'NEGOTIATION' },
 };
 
-// ── Quick-test message presets ──
-const TEST_MESSAGES = [
-  { label: 'UPI Mandate',    message: 'bhai salary 1st ko aayegi, tab pay kar dunga' },
-  { label: 'Pay Now',        message: 'okay bhai, pay karna chahta hoon abhi' },
-  { label: 'Discount',       message: 'poora amount afford nahi ho raha, kuch kam ho sakta hai?' },
-  { label: 'Dispute (STOP)', message: 'I already cancelled this, stop messaging me' },
-  { label: 'Legal Threat',   message: 'yeh fraud hai, main sue karunga tumhe' },
+const PIPELINE_STAGES = [
+  { key: 'FAILED',      label: 'Failed',      color: '#f87171', glow: 'rgba(248,113,113,0.2)' },
+  { key: 'TRIAGED',     label: 'Triaged',     color: '#facc15', glow: 'rgba(250,204,21,0.2)' },
+  { key: 'OUTREACH',    label: 'Outreach',    color: '#60a5fa', glow: 'rgba(96,165,250,0.2)' },
+  { key: 'NEGOTIATION', label: 'Negotiation', color: '#c084fc', glow: 'rgba(192,132,252,0.2)' },
+  { key: 'RECOVERED',   label: 'Recovered',   color: '#34d399', glow: 'rgba(52,211,153,0.2)' },
 ];
 
-function StatCard({ label, value, accent = 'text-[var(--color-pulse-red)]' }) {
+const TEST_MESSAGES = [
+  { label: 'UPI Mandate',    message: 'bhai salary 1st ko aayegi, tab pay kar dunga', icon: Clock },
+  { label: 'Pay Now',        message: 'okay bhai, pay karna chahta hoon abhi', icon: CheckCircle },
+  { label: 'Discount',       message: 'poora amount afford nahi ho raha, kuch kam ho sakta hai?', icon: Percent },
+  { label: 'Dispute (STOP)', message: 'I already cancelled this, stop messaging me', icon: XCircle },
+  { label: 'Legal Threat',   message: 'yeh fraud hai, main sue karunga tumhe', icon: AlertTriangle },
+];
+
+const REACT_STEP_CONFIG = {
+  THOUGHT:     { icon: Brain,    color: '#60a5fa', bg: 'rgba(96,165,250,0.08)',   border: 'rgba(96,165,250,0.2)',   label: 'THOUGHT' },
+  ACTION:      { icon: Zap,      color: '#c084fc', bg: 'rgba(192,132,252,0.08)',  border: 'rgba(192,132,252,0.2)',  label: 'ACTION' },
+  COMPLIANCE:  { icon: Shield,   color: '#fbbf24', bg: 'rgba(251,191,36,0.08)',   border: 'rgba(251,191,36,0.2)',   label: 'COMPLIANCE' },
+  OBSERVATION: { icon: Eye,      color: '#34d399', bg: 'rgba(52,211,153,0.08)',   border: 'rgba(52,211,153,0.2)',   label: 'OBSERVATION' },
+  DEFAULT:     { icon: Info,     color: '#9ca3af', bg: 'rgba(156,163,175,0.08)',  border: 'rgba(156,163,175,0.2)',  label: 'INFO' },
+};
+
+function classifyEntry(entry) {
+  const t = (entry.toolName || entry.type || '').toUpperCase();
+  if (t.includes('THOUGHT') || t.includes('THINK')) return 'THOUGHT';
+  if (t.includes('COMPLIANCE') || t.includes('BLOCKED')) return 'COMPLIANCE';
+  if (t === 'OBSERVATION' || entry.observation) return 'OBSERVATION';
+  return 'ACTION';
+}
+
+function getErrorCategory(errorCode) {
+  const soft = ['INSUFFICIENT_FUNDS', 'PAYMENT_DECLINED', 'LOW_BALANCE', 'PAYMENT_ACCOUNT_BLOCKED'];
+  const hard = ['CARD_EXPIRED', 'CARD_BLOCKED', 'INVALID_CARD', 'CARD_LOST', 'CARD_STOLEN', 'FRAUD_SUSPECTED'];
+  if (hard.includes(errorCode)) return { label: 'Hard Decline', color: 'text-red-400',    bg: 'rgba(248,113,113,0.1)', icon: XCircle,       iconColor: '#f87171' };
+  if (soft.includes(errorCode)) return { label: 'Soft Decline', color: 'text-yellow-400', bg: 'rgba(250,204,21,0.1)',  icon: AlertTriangle, iconColor: '#facc15' };
+  return                                { label: 'Infra Error',  color: 'text-blue-400',   bg: 'rgba(96,165,250,0.1)', icon: RefreshCw,     iconColor: '#60a5fa' };
+}
+
+// ─────────────────────────────────────────────
+// Sidebar
+// ─────────────────────────────────────────────
+const NAV = [
+  { id: 'overview',     label: 'Overview',     Icon: LayoutDashboard },
+  { id: 'transactions', label: 'Transactions', Icon: List },
+  { id: 'agent-feed',   label: 'Agent Feed',   Icon: Activity },
+  { id: 'analytics',    label: 'Analytics',    Icon: BarChart2 },
+];
+
+function Sidebar({ active, onSelect }) {
   return (
-    <div className="bg-[var(--color-bg-card)] border border-[var(--color-border)] rounded-xl p-5 hover:border-[var(--color-border-hover)] transition-all duration-300">
-      <p className="text-[var(--color-text-muted)] text-xs uppercase tracking-wider mb-2">{label}</p>
-      <p className={`text-3xl font-bold font-[var(--font-mono)] ${accent}`}>{value}</p>
+    <aside className="fixed left-0 top-0 h-full z-50 flex flex-col items-center py-5 gap-1"
+      style={{ width: 64, background: 'var(--color-bg-secondary)', borderRight: '1px solid var(--color-border)' }}>
+      {/* Logo */}
+      <motion.div
+        className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-base mb-5 cursor-default select-none"
+        style={{ background: 'linear-gradient(135deg,#ff3b5c,#ff8c42)', boxShadow: '0 0 20px rgba(255,59,92,0.35)' }}
+        animate={{ boxShadow: ['0 0 16px rgba(255,59,92,0.3)', '0 0 28px rgba(255,59,92,0.5)', '0 0 16px rgba(255,59,92,0.3)'] }}
+        transition={{ duration: 2.5, repeat: Infinity }}
+      >
+        R
+      </motion.div>
+
+      {NAV.map(({ id, label, Icon: NavIcon }) => {
+        const isActive = active === id;
+        return (
+          <div key={id} className="relative group w-full px-2">
+            <motion.button
+              onClick={() => onSelect(id)}
+              className="w-full flex items-center justify-center p-2.5 rounded-xl transition-colors relative overflow-hidden"
+              style={{
+                color: isActive ? 'white' : 'var(--color-text-muted)',
+                background: isActive ? 'rgba(255,59,92,0.15)' : 'transparent',
+              }}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              {isActive && (
+                <motion.span
+                  layoutId="sidebar-active"
+                  className="absolute inset-0 rounded-xl"
+                  style={{ background: 'rgba(255,59,92,0.15)' }}
+                />
+              )}
+              {isActive && (
+                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r"
+                  style={{ background: '#ff3b5c' }} />
+              )}
+              <NavIcon size={18} className="relative z-10" />
+            </motion.button>
+            {/* Tooltip */}
+            <div className="absolute left-14 top-1/2 -translate-y-1/2 px-2.5 py-1.5 rounded-lg text-xs font-medium
+              opacity-0 group-hover:opacity-100 pointer-events-none transition-all duration-200 whitespace-nowrap z-50 shadow-xl"
+              style={{
+                background: 'var(--color-bg-elevated)',
+                border: '1px solid var(--color-border)',
+                color: 'var(--color-text-primary)',
+              }}>
+              {label}
+            </div>
+          </div>
+        );
+      })}
+    </aside>
+  );
+}
+
+// ─────────────────────────────────────────────
+// Stat Card
+// ─────────────────────────────────────────────
+function StatCard({ label, value, accent = 'var(--color-text-primary)', Icon: CardIcon, iconColor, trend }) {
+  return (
+    <motion.div
+      className="rounded-2xl p-5 flex flex-col gap-3"
+      style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)' }}
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      whileHover={{ borderColor: 'var(--color-border-hover)', y: -2 }}
+      transition={{ duration: 0.25 }}
+    >
+      <div className="flex items-center justify-between">
+        <p className="text-xs uppercase tracking-widest" style={{ color: 'var(--color-text-muted)' }}>{label}</p>
+        {CardIcon && (
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center"
+            style={{ background: `${iconColor}15` }}>
+            <CardIcon size={15} style={{ color: iconColor }} />
+          </div>
+        )}
+      </div>
+      <p className="text-3xl font-bold font-mono" style={{ color: accent }}>{value}</p>
+      {trend !== undefined && (
+        <div className="flex items-center gap-1">
+          {trend >= 0
+            ? <TrendingUp size={13} className="text-emerald-400" />
+            : <TrendingDown size={13} className="text-red-400" />}
+          <span className={`text-xs ${trend >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+            {trend >= 0 ? '+' : ''}{trend}%
+          </span>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// Recovery Pipeline
+// ─────────────────────────────────────────────
+function RecoveryPipeline({ transactions }) {
+  const counts = {};
+  PIPELINE_STAGES.forEach(s => (counts[s.key] = 0));
+  transactions.forEach(t => {
+    const p = STATE_COLORS[t.state]?.pipeline;
+    if (p) counts[p] = (counts[p] || 0) + 1;
+  });
+
+  return (
+    <div className="rounded-2xl p-5 mb-6"
+      style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)' }}>
+      <p className="text-xs font-semibold uppercase tracking-widest mb-5" style={{ color: 'var(--color-text-muted)' }}>
+        Recovery Pipeline
+      </p>
+      <div className="flex items-center">
+        {PIPELINE_STAGES.map((stage, idx) => (
+          <div key={stage.key} className="flex items-center flex-1">
+            <div className="flex flex-col items-center gap-2 flex-1">
+              <motion.div
+                className="w-11 h-11 rounded-full flex items-center justify-center text-sm font-bold"
+                animate={counts[stage.key] > 0 ? {
+                  boxShadow: [`0 0 0 0 ${stage.glow}`, `0 0 0 8px transparent`],
+                } : {}}
+                transition={{ duration: 1.8, repeat: Infinity }}
+                style={{
+                  border: `2px solid ${counts[stage.key] > 0 ? stage.color : 'var(--color-border)'}`,
+                  background: counts[stage.key] > 0 ? stage.glow : 'var(--color-bg-elevated)',
+                  color: counts[stage.key] > 0 ? stage.color : 'var(--color-text-muted)',
+                }}
+              >
+                {counts[stage.key]}
+              </motion.div>
+              <span className="text-xs font-medium tracking-wide"
+                style={{ color: counts[stage.key] > 0 ? stage.color : 'var(--color-text-muted)' }}>
+                {stage.label}
+              </span>
+            </div>
+            {idx < PIPELINE_STAGES.length - 1 && (
+              <div className="flex items-center pb-5 flex-shrink-0 mx-1">
+                <ArrowRight size={14} style={{ color: 'var(--color-border-hover)' }} />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
+// ─────────────────────────────────────────────
+// Transaction Row
+// ─────────────────────────────────────────────
 function TransactionRow({ txn, onClick, isSelected }) {
-  const state = STATE_COLORS[txn.state] || { bg: 'bg-gray-500/20', text: 'text-gray-400', label: txn.state };
+  const sc = STATE_COLORS[txn.state] || { bg: 'bg-gray-500/10', text: 'text-gray-400', dot: '#6b7280', label: txn.state };
+  const cat = getErrorCategory(txn.errorCode);
+  const CatIcon = cat.icon;
   const time = new Date(txn.createdAt).toLocaleString('en-IN', {
     hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short',
   });
 
   return (
-    <tr
+    <motion.tr
       onClick={onClick}
-      className={`border-b border-[var(--color-border)] cursor-pointer transition-colors duration-200 ${
-        isSelected
-          ? 'bg-blue-500/10 border-l-2 border-l-blue-400'
-          : 'hover:bg-[var(--color-bg-card-hover)]'
-      }`}
+      className="border-b cursor-pointer"
+      style={{ borderColor: 'var(--color-border)' }}
+      animate={{ backgroundColor: isSelected ? 'rgba(96,165,250,0.06)' : 'transparent' }}
+      whileHover={{ backgroundColor: isSelected ? 'rgba(96,165,250,0.08)' : 'rgba(255,255,255,0.02)' }}
+      transition={{ duration: 0.15 }}
     >
-      <td className="py-3 px-4 text-sm font-medium">{txn.customerName}</td>
-      <td className="py-3 px-4 text-sm text-[var(--color-text-secondary)] font-[var(--font-mono)]">{txn.phone}</td>
-      <td className="py-3 px-4 text-sm font-semibold text-[var(--color-pulse-orange)] font-[var(--font-mono)]">
-        {'\u20B9'}{txn.originalAmount.toLocaleString('en-IN')}
-      </td>
-      <td className="py-3 px-4 text-sm text-[var(--color-text-secondary)] font-[var(--font-mono)]">{txn.errorCode}</td>
+      {/* Customer */}
       <td className="py-3 px-4">
-        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${state.bg} ${state.text}`}>
-          {state.label}
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+            style={{ background: 'linear-gradient(135deg,#448aff,#7c4dff)' }}>
+            {txn.customerName?.[0]?.toUpperCase() || '?'}
+          </div>
+          <span className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
+            {txn.customerName}
+          </span>
+        </div>
+      </td>
+      {/* Amount */}
+      <td className="py-3 px-4">
+        <span className="text-sm font-bold font-mono" style={{ color: 'var(--color-pulse-orange)' }}>
+          ₹{txn.originalAmount.toLocaleString('en-IN')}
         </span>
       </td>
-      <td className="py-3 px-4 text-xs text-[var(--color-text-muted)]">{time}</td>
-    </tr>
+      {/* Error Code */}
+      <td className="py-3 px-4">
+        <span className="text-xs font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+          {txn.errorCode}
+        </span>
+      </td>
+      {/* Root Cause */}
+      <td className="py-3 px-4">
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium"
+          style={{ background: cat.bg, color: cat.iconColor }}>
+          <CatIcon size={11} />
+          {cat.label}
+        </span>
+      </td>
+      {/* State */}
+      <td className="py-3 px-4">
+        <div className="flex items-center gap-1.5">
+          <motion.span
+            className="w-2 h-2 rounded-full flex-shrink-0"
+            style={{ background: sc.dot }}
+            animate={['OUTREACH_INITIATED', 'MANDATE_PENDING_AUTH'].includes(txn.state)
+              ? { scale: [1, 1.4, 1], opacity: [1, 0.6, 1] }
+              : {}}
+            transition={{ duration: 1.5, repeat: Infinity }}
+          />
+          <span className={`text-xs font-medium ${sc.text}`}>{sc.label}</span>
+        </div>
+      </td>
+      {/* Time */}
+      <td className="py-3 px-4">
+        <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{time}</span>
+      </td>
+    </motion.tr>
   );
 }
 
-// ── Agent test panel (slide-in from right) ──
+// ─────────────────────────────────────────────
+// ReAct Agent Feed
+// ─────────────────────────────────────────────
+function FeedEntry({ entry, index }) {
+  const kind = classifyEntry(entry);
+  const cfg = REACT_STEP_CONFIG[kind] || REACT_STEP_CONFIG.DEFAULT;
+  const StepIcon = cfg.icon;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -12 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ duration: 0.25, delay: index * 0.02 }}
+      className="rounded-xl px-3 py-2.5 text-xs"
+      style={{ background: cfg.bg, border: `1px solid ${cfg.border}` }}
+    >
+      <div className="flex items-center gap-2 mb-1">
+        <StepIcon size={11} style={{ color: cfg.color, flexShrink: 0 }} />
+        <span className="font-bold tracking-widest" style={{ color: cfg.color }}>{cfg.label}</span>
+        <span className="ml-auto font-mono opacity-40" style={{ color: cfg.color }}>
+          {entry.ts ? new Date(entry.ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''}
+        </span>
+      </div>
+      <p className="leading-relaxed font-mono" style={{ color: cfg.color, opacity: 0.8 }}>
+        {entry.toolName && kind === 'ACTION' && <span className="font-bold">[{entry.toolName}] </span>}
+        {entry.observation || entry.text || entry.message || ''}
+      </p>
+    </motion.div>
+  );
+}
+
+function AgentFeedPanel({ feedEntries }) {
+  const bottomRef = useRef(null);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [feedEntries]);
+
+  return (
+    <div className="rounded-2xl flex flex-col overflow-hidden"
+      style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', height: 500 }}>
+      <div className="px-4 py-3 flex items-center justify-between"
+        style={{ borderBottom: '1px solid var(--color-border)' }}>
+        <div className="flex items-center gap-2">
+          <motion.span
+            className="w-2 h-2 rounded-full bg-emerald-400"
+            animate={{ scale: [1, 1.4, 1], opacity: [1, 0.5, 1] }}
+            transition={{ duration: 2, repeat: Infinity }}
+          />
+          <span className="text-sm font-semibold">ReAct Agent Feed</span>
+        </div>
+        <span className="text-xs px-2 py-0.5 rounded-full font-mono"
+          style={{ background: 'var(--color-bg-elevated)', color: 'var(--color-text-muted)' }}>
+          LIVE · {feedEntries.length}
+        </span>
+      </div>
+      <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-1.5">
+        {feedEntries.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full gap-3"
+            style={{ color: 'var(--color-text-muted)' }}>
+            <Activity size={28} opacity={0.3} />
+            <p className="text-xs text-center">Waiting for agent activity...<br/>
+              <span className="opacity-60">Simulate a payment to see the ReAct loop</span>
+            </p>
+          </div>
+        ) : feedEntries.map((e, i) => <FeedEntry key={i} entry={e} index={i} />)}
+        <div ref={bottomRef} />
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// Batch Monitor
+// ─────────────────────────────────────────────
+function SemiGauge({ value, max }) {
+  const pct = max > 0 ? Math.min(value / max, 1) : 0;
+  const R = 78, cx = 100, cy = 95;
+  const toRad = d => (d * Math.PI) / 180;
+  const arc = (a1, a2) => {
+    const s = { x: cx + R * Math.cos(toRad(a1)), y: cy - R * Math.sin(toRad(a1)) };
+    const e = { x: cx + R * Math.cos(toRad(a2)), y: cy - R * Math.sin(toRad(a2)) };
+    return `M ${s.x} ${s.y} A ${R} ${R} 0 ${a1 - a2 > 180 ? 1 : 0} 0 ${e.x} ${e.y}`;
+  };
+  const endAngle = 180 - pct * 180;
+
+  return (
+    <svg width="200" height="110" viewBox="0 0 200 110">
+      <defs>
+        <linearGradient id="gGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="#448aff" />
+          <stop offset="100%" stopColor="#7c4dff" />
+        </linearGradient>
+      </defs>
+      <path d={arc(180, 0)} fill="none" stroke="var(--color-bg-elevated)" strokeWidth={12} strokeLinecap="round" />
+      {pct > 0 && (
+        <motion.path
+          d={arc(180, endAngle)}
+          fill="none" stroke="url(#gGrad)" strokeWidth={12} strokeLinecap="round"
+          initial={{ pathLength: 0 }} animate={{ pathLength: pct }}
+          transition={{ duration: 0.6, ease: 'easeOut' }}
+        />
+      )}
+      <text x={cx} y={cy - 8} textAnchor="middle" fill="var(--color-text-primary)"
+        fontSize="20" fontWeight="700" fontFamily="monospace">
+        {Math.round(pct * 100)}%
+      </text>
+      <text x={cx} y={cy + 10} textAnchor="middle" fill="var(--color-text-muted)"
+        fontSize="10" fontFamily="system-ui">
+        {value} / {max}
+      </text>
+    </svg>
+  );
+}
+
+function BatchMonitor({ batchProgress, batchRunning, recentBatch }) {
+  if (!batchProgress) return null;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}
+      className="rounded-2xl p-5 mb-6"
+      style={{
+        background: 'var(--color-bg-card)',
+        border: `1px solid ${batchRunning ? 'rgba(68,138,255,0.4)' : 'rgba(52,211,153,0.4)'}`,
+        boxShadow: batchRunning ? '0 0 24px rgba(68,138,255,0.08)' : '0 0 24px rgba(52,211,153,0.08)',
+      }}
+    >
+      <div className="flex items-center gap-2 mb-4">
+        {batchRunning
+          ? <motion.span className="w-2 h-2 rounded-full bg-blue-400"
+              animate={{ scale: [1,1.5,1], opacity:[1,0.4,1] }} transition={{ duration: 1, repeat: Infinity }} />
+          : <span className="w-2 h-2 rounded-full bg-emerald-400" />}
+        <h3 className="text-sm font-semibold">
+          {batchRunning ? 'Active Recovery Batch Monitor' : '✅ Batch Complete'}
+        </h3>
+        <span className="ml-auto text-xs font-mono px-2 py-0.5 rounded-full"
+          style={{ background: 'var(--color-bg-elevated)', color: 'var(--color-text-muted)' }}>
+          ✓ {batchProgress.success ?? 0} · ✗ {batchProgress.failed ?? 0}
+        </span>
+      </div>
+
+      <div className="flex gap-6 items-start">
+        <div className="flex-shrink-0">
+          <SemiGauge value={batchProgress.processed ?? 0} max={batchProgress.total || 50} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs uppercase tracking-widest mb-2.5" style={{ color: 'var(--color-text-muted)' }}>
+            Live Batch Activity
+          </p>
+          <div className="flex flex-col gap-2">
+            <AnimatePresence>
+              {recentBatch.slice(-5).map((t, i) => {
+                const sc = STATE_COLORS[t.state] || { text: 'text-gray-400', dot: '#6b7280', label: t.state };
+                const pct = ['RECOVERED'].includes(t.state) ? 100
+                  : ['OUTREACH_INITIATED','MANDATE_PENDING_AUTH','DISCOUNT_GATED_LINK'].includes(t.state) ? 70
+                  : t.state === 'SILENT_RETRY_SCHEDULED' ? 40 : 20;
+                return (
+                  <motion.div key={t._id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0 }} transition={{ duration: 0.2 }}
+                    className="flex items-center gap-2.5">
+                    <div className="w-6 h-6 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0"
+                      style={{ background: 'linear-gradient(135deg,#448aff,#7c4dff)', fontSize: 9 }}>
+                      {t.customerName?.[0]?.toUpperCase() || '?'}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-0.5">
+                        <span className="text-xs font-medium truncate" style={{ color: 'var(--color-text-primary)' }}>
+                          {t.customerName}
+                        </span>
+                        <span className={`text-xs ${sc.text} ml-2`}>{sc.label}</span>
+                      </div>
+                      <div className="h-1 rounded-full overflow-hidden" style={{ background: 'var(--color-bg-elevated)' }}>
+                        <motion.div className="h-full rounded-full"
+                          initial={{ width: 0 }} animate={{ width: `${pct}%` }}
+                          transition={{ duration: 0.5 }}
+                          style={{ background: sc.dot }} />
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+            {recentBatch.length === 0 && (
+              <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Processing records...</p>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-3 mt-4">
+            {[
+              { label: 'Projected Recovery', value: `₹${((batchProgress.success ?? 0) * 5200).toLocaleString('en-IN')}`, color: '#34d399' },
+              { label: 'Active Escalations', value: batchProgress.failed ?? 0, color: '#fb923c' },
+            ].map(s => (
+              <div key={s.label} className="rounded-xl p-3"
+                style={{ background: 'var(--color-bg-elevated)' }}>
+                <p className="text-xs mb-1" style={{ color: 'var(--color-text-muted)' }}>{s.label}</p>
+                <p className="text-lg font-bold font-mono" style={{ color: s.color }}>{s.value}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// Agent Panel (Transaction Intelligence)
+// ─────────────────────────────────────────────
+const COMPLIANCE_CHECKS = [
+  { label: 'Contact Window',      desc: '8AM–7PM IST enforced',     ok: true },
+  { label: 'Outreach Cap',        desc: 'Max 5 messages',           ok: true },
+  { label: 'Discount Bounds',     desc: '5–10% only in code',       ok: true },
+  { label: 'Language Preference', desc: 'Hinglish auto-detected',   ok: true },
+];
+
 function AgentPanel({ txn, onClose }) {
   const [message, setMessage] = useState('');
   const [log, setLog] = useState([]);
+  const [auditHistory, setAuditHistory] = useState([]);
+  const [conversations, setConversations] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
   const [sending, setSending] = useState(false);
   const [capturing, setCapturing] = useState(false);
-  const logEndRef = useRef(null);
+  const [activeTab, setActiveTab] = useState('chat');
+  const bottomRef = useRef(null);
 
+  // Load persisted audit log + conversation history from MongoDB on mount
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [log]);
+    setLoadingHistory(true);
+    api.getTransaction(txn._id)
+      .then(res => {
+        setAuditHistory(res.data.auditLogs || []);
+        setConversations(res.data.conversations || []);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingHistory(false));
+  }, [txn._id]);
 
-  const addLog = (type, text) => {
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [log]);
+
+  const addLog = (type, text) =>
     setLog(prev => [...prev, { type, text, ts: new Date().toLocaleTimeString('en-IN') }]);
-  };
 
   const send = async (msg) => {
     const m = (msg || message).trim();
@@ -85,7 +541,6 @@ function AgentPanel({ txn, onClose }) {
     setMessage('');
     setSending(true);
     addLog('user', m);
-
     try {
       const res = await fetch('/api/agent/process', {
         method: 'POST',
@@ -93,201 +548,553 @@ function AgentPanel({ txn, onClose }) {
         body: JSON.stringify({ transactionId: txn._id, inboundMessage: m }),
       });
       const data = await res.json();
-
       if (data.success) {
         const d = data.data;
         if (d.complianceBlocked) {
-          addLog('compliance', 'BLOCKED by Compliance Cop: ' + d.observation);
+          addLog('compliance', 'BLOCKED: ' + d.observation);
         } else {
-          addLog('agent', 'Tool: ' + d.toolName);
-          addLog('observation', d.observation);
-          // Surface the Razorpay link as a separate clickable entry
-          if (d.paymentLink) {
-            addLog('link', d.paymentLink);
-          }
+          addLog('agent', `[${d.toolName}] ${d.observation}`);
+          if (d.paymentLink) addLog('link', d.paymentLink);
         }
-      } else {
-        addLog('error', data.error || 'Agent error');
-      }
-    } catch (err) {
-      addLog('error', err.message);
-    } finally {
-      setSending(false);
-    }
+      } else addLog('error', data.error || 'Agent error');
+    } catch (err) { addLog('error', err.message); }
+    finally { setSending(false); }
   };
 
-  // Simulates the Razorpay payment.captured webhook — closes the recovery loop
   const simulateCapture = async () => {
     if (capturing) return;
     setCapturing(true);
-    addLog('system', 'Simulating Razorpay payment.captured webhook...');
+    addLog('system', 'Firing Razorpay payment.captured webhook...');
     try {
       const data = await api.simulateRazorpayCapture(txn._id, txn.originalAmount);
-      if (data.status === 'ok') {
-        addLog('recovered', `Payment captured! Rs.${data.amountRecovered?.toLocaleString('en-IN') ?? txn.originalAmount} recovered. State → RECOVERED`);
-      } else if (data.status === 'already_recovered') {
-        addLog('recovered', 'Transaction is already in RECOVERED state.');
-      } else {
-        addLog('error', 'Capture response: ' + JSON.stringify(data));
-      }
-    } catch (err) {
-      addLog('error', 'Capture failed: ' + err.message);
-    } finally {
-      setCapturing(false);
-    }
+      if (data.status === 'ok') addLog('recovered', `✅ Recovered ₹${data.amountRecovered?.toLocaleString('en-IN') ?? txn.originalAmount}`);
+      else if (data.status === 'already_recovered') addLog('recovered', 'Already RECOVERED.');
+      else addLog('error', JSON.stringify(data));
+    } catch (err) { addLog('error', err.message); }
+    finally { setCapturing(false); }
   };
 
-  const LOG_STYLES = {
-    user:        'bg-blue-500/15 text-blue-300 self-end',
-    agent:       'bg-[var(--color-bg-secondary)] text-[var(--color-text-primary)]',
-    observation: 'bg-green-500/10 text-green-400 text-xs',
-    link:        'bg-blue-500/10 text-blue-300 border border-blue-500/30 text-xs',
-    compliance:  'bg-amber-500/15 text-amber-400 border border-amber-500/30',
-    error:       'bg-red-500/15 text-red-400',
-    system:      'bg-[var(--color-bg-elevated)] text-[var(--color-text-muted)] text-xs italic',
-    recovered:   'bg-green-500/20 text-green-300 border border-green-500/30 font-semibold',
-  };
+  const sc = STATE_COLORS[txn.state] || { bg: 'bg-gray-500/10', text: 'text-gray-400', dot: '#6b7280', label: txn.state };
 
-  const state = STATE_COLORS[txn.state] || { bg: 'bg-gray-500/20', text: 'text-gray-400', label: txn.state };
+  const bubbleStyle = {
+    user: { align: 'justify-end', bg: 'linear-gradient(135deg,#448aff,#7c4dff)', color: 'white', radius: '12px 12px 4px 12px' },
+    agent: { align: 'justify-start', bg: 'var(--color-bg-elevated)', color: 'var(--color-text-secondary)', radius: '12px 12px 12px 4px' },
+    compliance: { align: 'justify-start', bg: 'rgba(251,191,36,0.1)', color: '#fbbf24', radius: '8px' },
+    error: { align: 'justify-start', bg: 'rgba(248,113,113,0.1)', color: '#f87171', radius: '8px' },
+    system: { align: 'justify-center', bg: 'rgba(156,163,175,0.08)', color: 'var(--color-text-muted)', radius: '8px' },
+    recovered: { align: 'justify-start', bg: 'rgba(52,211,153,0.12)', color: '#34d399', radius: '8px' },
+  };
 
   return (
-    <div className="fixed top-0 right-0 h-full w-[420px] bg-[var(--color-bg-secondary)] border-l border-[var(--color-border)] flex flex-col z-50 shadow-2xl">
+    <motion.div
+      initial={{ x: 440, opacity: 0 }}
+      animate={{ x: 0, opacity: 1 }}
+      exit={{ x: 440, opacity: 0 }}
+      transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+      className="fixed top-0 right-0 h-full flex flex-col z-50 shadow-2xl"
+      style={{ width: 440, background: 'var(--color-bg-secondary)', borderLeft: '1px solid var(--color-border)' }}
+    >
       {/* Header */}
-      <div className="px-5 py-4 border-b border-[var(--color-border)] flex items-start justify-between">
-        <div>
-          <h3 className="font-semibold text-sm">{txn.customerName}</h3>
-          <p className="text-xs text-[var(--color-text-muted)] font-[var(--font-mono)] mt-0.5">{txn.phone}</p>
-          <div className="flex items-center gap-2 mt-2">
-            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${state.bg} ${state.text}`}>
-              {state.label}
-            </span>
-            <span className="text-xs text-[var(--color-text-muted)]">
-              {'\u20B9'}{txn.originalAmount.toLocaleString('en-IN')} &bull; {txn.errorCode}
-            </span>
+      <div className="px-5 py-4" style={{ borderBottom: '1px solid var(--color-border)' }}>
+        <div className="flex items-start justify-between mb-3">
+          <p className="text-xs uppercase tracking-widest" style={{ color: 'var(--color-text-muted)' }}>
+            Transaction Intelligence
+          </p>
+          <motion.button onClick={onClose} whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+            className="p-1.5 rounded-lg" style={{ color: 'var(--color-text-muted)' }}>
+            <X size={16} />
+          </motion.button>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold text-white"
+            style={{ background: 'linear-gradient(135deg,#448aff,#7c4dff)' }}>
+            {txn.customerName?.[0]?.toUpperCase() || '?'}
           </div>
+          <div>
+            <p className="font-semibold">{txn.customerName}</p>
+            <p className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>{txn.phone}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium ${sc.bg} ${sc.text}`}>
+            <motion.span className="w-1.5 h-1.5 rounded-full" style={{ background: sc.dot }}
+              animate={{ scale: [1,1.4,1], opacity:[1,0.6,1] }}
+              transition={{ duration: 1.5, repeat: Infinity }} />
+            {sc.label}
+          </span>
+          <span className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>
+            ₹{txn.originalAmount.toLocaleString('en-IN')} · {txn.errorCode}
+          </span>
           {txn.activePaymentLink && (
-            <a
-              href={txn.activePaymentLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 mt-2 text-xs text-blue-400 underline underline-offset-2 hover:text-blue-300 transition-colors break-all"
-            >
-              🔗 {txn.mandateId ? 'Mandate' : 'Payment'} Link: {txn.activePaymentLink}
+            <a href={txn.activePaymentLink} target="_blank" rel="noopener noreferrer"
+              className="text-xs text-blue-400 underline underline-offset-2 hover:text-blue-300 transition-colors">
+              🔗 Payment Link
             </a>
           )}
         </div>
-        <button
-          onClick={onClose}
-          className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] text-lg leading-none mt-1"
-        >
-          &times;
-        </button>
       </div>
 
-      {/* Quick-test presets */}
-      <div className="px-4 py-3 border-b border-[var(--color-border)]">
-        <p className="text-xs text-[var(--color-text-muted)] mb-2 uppercase tracking-wider">Quick tests</p>
-        <div className="flex flex-wrap gap-1.5">
-          {TEST_MESSAGES.map(({ label, message: m }) => (
-            <button
-              key={label}
-              onClick={() => send(m)}
-              disabled={sending}
-              className="px-2.5 py-1 rounded-full text-xs font-medium bg-[var(--color-bg-card)] border border-[var(--color-border)] hover:border-[var(--color-border-hover)] disabled:opacity-40 transition-colors"
-            >
-              {label}
-            </button>
+      {/* Compliance Guard */}
+      <div className="px-5 py-3" style={{ borderBottom: '1px solid var(--color-border)' }}>
+        <div className="flex items-center gap-2 mb-2.5">
+          <Shield size={13} style={{ color: '#34d399' }} />
+          <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--color-text-muted)' }}>
+            Compliance Guard
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          {COMPLIANCE_CHECKS.map(({ label, desc, ok }) => (
+            <div key={label} className="flex items-center gap-2 rounded-lg px-2.5 py-1.5"
+              style={{ background: 'var(--color-bg-card)' }}>
+              <CheckCircle2 size={13} className={ok ? 'text-emerald-400' : 'text-red-400'} />
+              <div>
+                <p className="text-xs font-medium leading-none mb-0.5">{label}</p>
+                <p className="text-xs leading-none" style={{ color: 'var(--color-text-muted)', fontSize: 10 }}>{desc}</p>
+              </div>
+            </div>
           ))}
         </div>
       </div>
 
-      {/* Razorpay payment capture simulation */}
-      <div className="px-4 py-3 border-b border-[var(--color-border)]">
-        <p className="text-xs text-[var(--color-text-muted)] mb-2 uppercase tracking-wider">Razorpay</p>
-        <button
-          onClick={simulateCapture}
-          disabled={capturing || txn.state === 'RECOVERED' || txn.state === 'ESCALATED_TO_HUMAN'}
-          className="w-full px-3 py-2 rounded-lg text-xs font-semibold bg-green-500/15 text-green-400 border border-green-500/30 hover:bg-green-500/25 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
-        >
-          {capturing ? (
-            <>
-              <div className="w-3 h-3 border border-green-400 border-t-transparent rounded-full animate-spin" />
-              Sending capture webhook...
-            </>
-          ) : txn.state === 'RECOVERED' ? (
-            '✓ Already Recovered'
-          ) : (
-            `⚡ Simulate payment.captured → RECOVERED (Rs.${txn.originalAmount?.toLocaleString('en-IN')})`
-          )}
-        </button>
-        <p className="text-xs text-[var(--color-text-muted)] mt-1.5">
-          Fires a fake Razorpay webhook to close the recovery loop without ngrok.
-        </p>
+      {/* Tabs */}
+      <div className="flex px-5 gap-4" style={{ borderBottom: '1px solid var(--color-border)' }}>
+        {[
+          { id: 'chat',     label: 'Conversation', Icon: MessageSquare },
+          { id: 'audit',    label: 'Audit Log',    Icon: Activity },
+          { id: 'quick',    label: 'Quick Tests',  Icon: Zap },
+        ].map(t => (
+          <button key={t.id} onClick={() => setActiveTab(t.id)}
+            className="flex items-center gap-1.5 py-2.5 text-xs font-medium border-b-2 transition-colors"
+            style={{
+              borderColor: activeTab === t.id ? 'var(--color-pulse-red)' : 'transparent',
+              color: activeTab === t.id ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+            }}>
+            <t.Icon size={12} />
+            {t.label}
+          </button>
+        ))}
       </div>
 
-      {/* Log */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-2">
-        {log.length === 0 && (
-          <p className="text-xs text-[var(--color-text-muted)] text-center mt-8">
-            Click a quick test or type a message to trigger the agent
-          </p>
+      {/* Tab body */}
+      <div className="flex-1 overflow-y-auto px-4 py-3">
+        {/* CHAT */}
+        {activeTab === 'chat' && (
+          <div className="flex flex-col gap-2">
+            <AnimatePresence initial={false}>
+              {log.length === 0 && (
+                <p className="text-xs text-center mt-10" style={{ color: 'var(--color-text-muted)' }}>
+                  Send a message to simulate the customer
+                </p>
+              )}
+              {log.map((entry, i) => {
+                if (entry.type === 'link') return (
+                  <motion.div key={i} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+                    className="self-start max-w-[88%]">
+                    <a href={entry.text} target="_blank" rel="noopener noreferrer"
+                      className="block rounded-xl px-3 py-2 text-xs font-mono underline break-all"
+                      style={{ background: 'rgba(68,138,255,0.1)', border: '1px solid rgba(68,138,255,0.25)', color: '#60a5fa' }}>
+                      🔗 {entry.text}
+                    </a>
+                  </motion.div>
+                );
+                const bs = bubbleStyle[entry.type] || bubbleStyle.system;
+                return (
+                  <motion.div key={i} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+                    className={`flex ${bs.align}`}>
+                    <div className="max-w-[88%] px-3 py-2 text-sm leading-snug"
+                      style={{ background: bs.bg, color: bs.color, borderRadius: bs.radius }}>
+                      {entry.text}
+                      <p className="text-xs mt-1 opacity-40">{entry.ts}</p>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+            {sending && (
+              <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                <motion.div className="w-3 h-3 border-2 rounded-full"
+                  style={{ borderColor: '#ff3b5c', borderTopColor: 'transparent' }}
+                  animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }} />
+                Agent thinking...
+              </div>
+            )}
+            <div ref={bottomRef} />
+          </div>
         )}
-        {log.map((entry, i) => (
-          <div key={i} className={`rounded-lg px-3 py-2 max-w-[90%] ${LOG_STYLES[entry.type]}`}>
-            <p className="text-xs opacity-60 mb-0.5">{entry.type.toUpperCase()} &bull; {entry.ts}</p>
-            {entry.type === 'link' ? (
-              <a
-                href={entry.text}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm underline underline-offset-2 break-all hover:text-blue-200 transition-colors"
-              >
-                🔗 {entry.text}
-              </a>
+
+        {/* AUDIT LOG — persisted from MongoDB */}
+        {activeTab === 'audit' && (
+          <div className="flex flex-col gap-2 py-1">
+            {loadingHistory ? (
+              <div className="flex items-center justify-center py-10 gap-2"
+                style={{ color: 'var(--color-text-muted)' }}>
+                <motion.div className="w-4 h-4 border-2 rounded-full"
+                  style={{ borderColor: 'var(--color-pulse-red)', borderTopColor: 'transparent' }}
+                  animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }} />
+                Loading audit log...
+              </div>
+            ) : auditHistory.length === 0 ? (
+              <p className="text-xs text-center mt-10" style={{ color: 'var(--color-text-muted)' }}>
+                No audit entries yet — send a message to begin
+              </p>
             ) : (
-              <p className="text-sm leading-snug">{entry.text}</p>
+              <>
+                {/* Conversation thread (persisted) */}
+                {conversations.length > 0 && (
+                  <div className="mb-3">
+                    <p className="text-xs uppercase tracking-widest mb-2 px-1"
+                      style={{ color: 'var(--color-text-muted)' }}>Message Thread</p>
+                    <div className="flex flex-col gap-1.5">
+                      {conversations.map((msg, i) => {
+                        const isInbound = msg.direction === 'inbound';
+                        const channelIcon = msg.channel === 'email' ? '✉' : msg.channel === 'whatsapp' ? '💬' : '🎙';
+                        return (
+                          <div key={i} className={`flex ${isInbound ? 'justify-end' : 'justify-start'}`}>
+                            <div className="max-w-[88%] px-3 py-2 text-xs leading-snug rounded-xl"
+                              style={isInbound
+                                ? { background: 'linear-gradient(135deg,#448aff,#7c4dff)', color: 'white', borderRadius: '12px 12px 4px 12px' }
+                                : { background: 'var(--color-bg-elevated)', color: 'var(--color-text-secondary)', borderRadius: '12px 12px 12px 4px' }
+                              }>
+                              <span className="mr-1 opacity-60">{channelIcon}</span>
+                              {msg.body}
+                              <p className="text-xs mt-0.5 opacity-40">
+                                {new Date(msg.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* ReAct audit steps (persisted) */}
+                <p className="text-xs uppercase tracking-widest mb-2 px-1"
+                  style={{ color: 'var(--color-text-muted)' }}>ReAct Audit Trail</p>
+                {auditHistory.map((entry, i) => {
+                  const kindMap = { THOUGHT: 'THOUGHT', ACTION: 'ACTION', COMPLIANCE_CHECK: 'COMPLIANCE', OBSERVATION: 'OBSERVATION' };
+                  const kind = kindMap[entry.step] || 'DEFAULT';
+                  const cfg = REACT_STEP_CONFIG[kind] || REACT_STEP_CONFIG.DEFAULT;
+                  const StepIcon = cfg.icon;
+                  const text = entry.thoughtProcess
+                    || (entry.toolName ? `[${entry.toolName}] ` : '')
+                      + (entry.toolOutput?.observation || entry.complianceReason || JSON.stringify(entry.toolInput || {})).slice(0, 120)
+                    || '';
+                  const complianceVerdict = entry.step === 'COMPLIANCE_CHECK';
+
+                  return (
+                    <motion.div key={i} initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: i * 0.02 }}
+                      className="flex gap-3 items-start">
+                      <div className="flex flex-col items-center flex-shrink-0">
+                        <div className="w-6 h-6 rounded-full flex items-center justify-center"
+                          style={{ background: cfg.bg, border: `1px solid ${cfg.border}` }}>
+                          <StepIcon size={10} style={{ color: cfg.color }} />
+                        </div>
+                        {i < auditHistory.length - 1 && (
+                          <div className="w-px flex-1 mt-1"
+                            style={{ background: 'var(--color-border)', minHeight: 10 }} />
+                        )}
+                      </div>
+                      <div className="flex-1 rounded-xl px-3 py-2 text-xs mb-1"
+                        style={{ background: cfg.bg, border: `1px solid ${cfg.border}` }}>
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className="font-bold tracking-widest" style={{ color: cfg.color }}>{cfg.label}</span>
+                          {complianceVerdict && (
+                            <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${entry.complianceVerified ? 'text-emerald-400 bg-emerald-500/10' : 'text-red-400 bg-red-500/10'}`}>
+                              {entry.complianceVerified ? '✓ APPROVED' : '✗ REJECTED'}
+                            </span>
+                          )}
+                          {entry.fromState && entry.toState && (
+                            <span className="ml-auto text-xs opacity-50 font-mono"
+                              style={{ color: cfg.color }}>
+                              {entry.fromState?.split('_').pop()} → {entry.toState?.split('_').pop()}
+                            </span>
+                          )}
+                        </div>
+                        <p className="leading-relaxed font-mono" style={{ color: cfg.color, opacity: 0.82 }}>
+                          {text}
+                        </p>
+                        <p className="mt-0.5 opacity-30 font-mono" style={{ color: cfg.color, fontSize: 10 }}>
+                          {new Date(entry.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                        </p>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </>
             )}
           </div>
-        ))}
-        {sending && (
-          <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-            <div className="w-3 h-3 border border-[var(--color-pulse-red)] border-t-transparent rounded-full animate-spin" />
-            Agent thinking...
+        )}
+
+        {/* QUICK TESTS */}
+        {activeTab === 'quick' && (
+          <div className="flex flex-col gap-2.5 py-1">
+            <p className="text-xs mb-1" style={{ color: 'var(--color-text-muted)' }}>
+              Simulate customer replies to test the ReAct loop
+            </p>
+            {TEST_MESSAGES.map(({ label, message: m, icon: MsgIcon }) => (
+              <motion.button key={label} disabled={sending}
+                onClick={() => { send(m); setActiveTab('chat'); }}
+                className="w-full text-left px-4 py-3 rounded-xl transition-all"
+                style={{
+                  background: 'var(--color-bg-card)',
+                  border: '1px solid var(--color-border)',
+                  opacity: sending ? 0.5 : 1,
+                  cursor: sending ? 'not-allowed' : 'pointer',
+                }}
+                whileHover={!sending ? { borderColor: 'var(--color-border-hover)', x: 2 } : {}}
+                whileTap={!sending ? { scale: 0.98 } : {}}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <MsgIcon size={12} style={{ color: 'var(--color-text-muted)' }} />
+                  <span className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>{label}</span>
+                </div>
+                <p className="text-xs font-mono" style={{ color: 'var(--color-text-muted)', opacity: 0.7 }}>"{m}"</p>
+              </motion.button>
+            ))}
+
+            <div className="mt-1 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
+              <p className="text-xs uppercase tracking-widest mb-2" style={{ color: 'var(--color-text-muted)' }}>
+                Razorpay Simulation
+              </p>
+              <motion.button
+                disabled={capturing || txn.state === 'RECOVERED' || txn.state === 'ESCALATED_TO_HUMAN'}
+                onClick={() => { simulateCapture(); setActiveTab('chat'); }}
+                className="w-full px-4 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2"
+                style={{
+                  background: 'rgba(52,211,153,0.08)',
+                  border: '1px solid rgba(52,211,153,0.25)',
+                  color: '#34d399',
+                  opacity: (capturing || ['RECOVERED','ESCALATED_TO_HUMAN'].includes(txn.state)) ? 0.4 : 1,
+                  cursor: (capturing || ['RECOVERED','ESCALATED_TO_HUMAN'].includes(txn.state)) ? 'not-allowed' : 'pointer',
+                }}
+                whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+              >
+                {capturing ? (
+                  <>
+                    <motion.div className="w-3 h-3 border-2 rounded-full"
+                      style={{ borderColor: '#34d399', borderTopColor: 'transparent' }}
+                      animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }} />
+                    Sending webhook...
+                  </>
+                ) : txn.state === 'RECOVERED' ? '✓ Already Recovered'
+                  : `⚡ Simulate payment.captured → RECOVERED (₹${txn.originalAmount?.toLocaleString('en-IN')})`}
+              </motion.button>
+            </div>
           </div>
         )}
-        <div ref={logEndRef} />
       </div>
 
-      {/* Input */}
-      <div className="px-4 py-3 border-t border-[var(--color-border)]">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={message}
-            onChange={e => setMessage(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && send()}
-            placeholder="Type customer message..."
-            disabled={sending}
-            className="flex-1 bg-[var(--color-bg-card)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-hover)] disabled:opacity-40"
-          />
-          <button
-            onClick={() => send()}
-            disabled={!message.trim() || sending}
-            className="px-4 py-2 bg-gradient-to-r from-[var(--color-pulse-red)] to-[var(--color-pulse-orange)] text-white text-sm font-semibold rounded-lg hover:opacity-90 disabled:opacity-40 transition-opacity"
-          >
-            Send
-          </button>
+      {/* Message Input */}
+      {activeTab === 'chat' && (
+        <div className="px-4 py-3" style={{ borderTop: '1px solid var(--color-border)' }}>
+          <div className="flex gap-2">
+            <input
+              type="text" value={message} disabled={sending}
+              onChange={e => setMessage(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && send()}
+              placeholder="Type customer message..."
+              className="flex-1 rounded-xl px-3 py-2 text-sm focus:outline-none"
+              style={{
+                background: 'var(--color-bg-card)',
+                border: '1px solid var(--color-border)',
+                color: 'var(--color-text-primary)',
+              }}
+            />
+            <motion.button disabled={!message.trim() || sending}
+              onClick={() => send()}
+              className="px-3 py-2 rounded-xl flex items-center justify-center"
+              style={{
+                background: 'linear-gradient(135deg,var(--color-pulse-red),var(--color-pulse-orange))',
+                color: 'white',
+                opacity: !message.trim() || sending ? 0.4 : 1,
+                cursor: !message.trim() || sending ? 'not-allowed' : 'pointer',
+              }}
+              whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.9 }}>
+              <Send size={15} />
+            </motion.button>
+          </div>
         </div>
-        <p className="text-xs text-[var(--color-text-muted)] mt-2">
-          Click a row to open this panel. Razorpay links appear as clickable URLs in the log.
-          Use "Simulate payment.captured" above to close the recovery loop without ngrok.
-        </p>
-      </div>
-    </div>
+      )}
+    </motion.div>
   );
 }
 
-function App() {
+// ─────────────────────────────────────────────
+// Analytics View (Day 9)
+// ─────────────────────────────────────────────
+function AnalyticsView({ stats, transactions }) {
+  const exceptions = transactions.filter(t =>
+    ['ESCALATED_TO_HUMAN', 'RECOVERY_FAILED', 'STOPPING_RULE_TRIGGERED'].includes(t.state)
+  );
+  const silentRecoveries = transactions.filter(t =>
+    t.state === 'RECOVERED' && t.errorCategory === 'infra'
+  );
+  const mandated = transactions.filter(t => t.state === 'MANDATE_PENDING_AUTH' || t.mandateId);
+  const total = stats?.totalTransactions || 0;
+  const recovered = stats?.recovered || 0;
+  const recoveryPct = total > 0 ? ((recovered / total) * 100).toFixed(1) : '0.0';
+
+  return (
+    <>
+      <div className="flex items-center justify-between mb-5">
+        <h2 className="text-lg font-semibold">Analytics Summary</h2>
+        <span className="text-xs px-2.5 py-1 rounded-full font-mono"
+          style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>
+          {total} total transactions
+        </span>
+      </div>
+
+      {/* Top stat cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <StatCard label="Total" value={total} Icon={List} iconColor="#9ca3af" />
+        <StatCard label="Recovered" value={recovered} accent="#34d399" Icon={UserCheck} iconColor="#34d399" />
+        <StatCard label="Escalated" value={stats?.escalated ?? 0} accent="#fbbf24" Icon={AlertTriangle} iconColor="#fbbf24" />
+        <StatCard label="In Progress" value={stats?.inProgress ?? 0} accent="#60a5fa" Icon={RefreshCw} iconColor="#60a5fa" />
+      </div>
+
+      {/* Money cards */}
+      <div className="grid grid-cols-3 gap-4 mb-6">
+        {[
+          { label: 'Gross Value at Risk',  value: `₹${(stats?.grossValueAtRisk ?? 0).toLocaleString('en-IN')}`,      color: '#f87171', Icon: DollarSign },
+          { label: 'Total Recovered',      value: `₹${(stats?.totalRecoveredAmount ?? 0).toLocaleString('en-IN')}`,  color: '#34d399', Icon: CheckCircle2 },
+          { label: 'Recovery Rate',        value: `${recoveryPct}%`,                                                  color: '#448aff', Icon: Percent },
+        ].map(s => (
+          <motion.div key={s.label} className="rounded-2xl p-5"
+            style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)' }}
+            whileHover={{ borderColor: 'var(--color-border-hover)', y: -2 }}
+            transition={{ duration: 0.2 }}>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs uppercase tracking-widest" style={{ color: 'var(--color-text-muted)' }}>{s.label}</p>
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: `${s.color}15` }}>
+                <s.Icon size={13} style={{ color: s.color }} />
+              </div>
+            </div>
+            <p className="text-3xl font-bold font-mono" style={{ color: s.color }}>{s.value}</p>
+          </motion.div>
+        ))}
+      </div>
+
+      {/* Pipeline */}
+      <RecoveryPipeline transactions={transactions} />
+
+      {/* Secondary stats row */}
+      <div className="grid grid-cols-2 gap-4 mb-6">
+        <div className="rounded-2xl p-5"
+          style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)' }}>
+          <p className="text-xs uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-muted)' }}>Silent Recoveries</p>
+          <p className="text-xs mb-3" style={{ color: 'var(--color-text-muted)', opacity: 0.7 }}>
+            Infra errors resolved without customer contact
+          </p>
+          <p className="text-3xl font-bold font-mono" style={{ color: '#facc15' }}>{silentRecoveries.length}</p>
+        </div>
+        <div className="rounded-2xl p-5"
+          style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)' }}>
+          <p className="text-xs uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-muted)' }}>Mandate / Pending Auth</p>
+          <p className="text-xs mb-3" style={{ color: 'var(--color-text-muted)', opacity: 0.7 }}>
+            UPI AutoPay mandates awaiting authorization
+          </p>
+          <p className="text-3xl font-bold font-mono" style={{ color: '#c084fc' }}>{mandated.length}</p>
+        </div>
+      </div>
+
+      {/* Honest Exception List */}
+      <div className="rounded-2xl overflow-hidden"
+        style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)' }}>
+        <div className="px-5 py-4 flex items-center justify-between"
+          style={{ borderBottom: '1px solid var(--color-border)' }}>
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={15} style={{ color: '#fbbf24' }} />
+            <h3 className="text-sm font-semibold">Honest Exception List</h3>
+          </div>
+          <span className="text-xs px-2 py-0.5 rounded-full font-mono"
+            style={{ background: 'rgba(251,191,36,0.1)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.2)' }}>
+            {exceptions.length} exceptions
+          </span>
+        </div>
+        {exceptions.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 gap-2"
+            style={{ color: 'var(--color-text-muted)' }}>
+            <CheckCircle2 size={28} className="text-emerald-400 opacity-50" />
+            <p className="text-sm">No exceptions — all transactions resolved cleanly</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="text-xs uppercase tracking-widest"
+                  style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-muted)' }}>
+                  {['Customer', 'Amount', 'Error Code', 'State', 'Reason', 'Time'].map(h => (
+                    <th key={h} className="py-3 px-4 text-left font-medium">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {exceptions.map((txn, i) => {
+                  const sc = STATE_COLORS[txn.state] || { text: 'text-gray-400', dot: '#6b7280', label: txn.state };
+                  return (
+                    <motion.tr key={txn._id}
+                      initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                      transition={{ delay: i * 0.04 }}
+                      className="border-b"
+                      style={{ borderColor: 'var(--color-border)' }}>
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+                            style={{ background: 'linear-gradient(135deg,#f87171,#fb923c)', fontSize: 9 }}>
+                            {txn.customerName?.[0]?.toUpperCase() || '?'}
+                          </div>
+                          <span className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
+                            {txn.customerName}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="text-sm font-bold font-mono" style={{ color: 'var(--color-pulse-orange)' }}>
+                          ₹{txn.originalAmount.toLocaleString('en-IN')}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="text-xs font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                          {txn.errorCode}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: sc.dot }} />
+                          <span className={`text-xs font-medium ${sc.text}`}>{sc.label}</span>
+                        </div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="text-xs px-2 py-0.5 rounded-lg"
+                          style={{ background: 'rgba(251,191,36,0.08)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.15)' }}>
+                          {txn.escalationReason
+                            ? txn.escalationReason.replace(/_/g, ' ').toLowerCase()
+                            : txn.state === 'RECOVERY_FAILED' ? 'outreach exhausted' : 'unknown'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                          {new Date(txn.createdAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </td>
+                    </motion.tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────
+// Main App
+// ─────────────────────────────────────────────
+export default function App() {
   const [transactions, setTransactions] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -295,14 +1102,14 @@ function App() {
   const [error, setError] = useState(null);
   const [selectedTxn, setSelectedTxn] = useState(null);
   const [batchRunning, setBatchRunning] = useState(false);
-  const [batchProgress, setBatchProgress] = useState(null); // { processed, total, success, failed }
+  const [batchProgress, setBatchProgress] = useState(null);
+  const [activeView, setActiveView] = useState('overview');
+  const [feedEntries, setFeedEntries] = useState([]);
+  const [recentBatch, setRecentBatch] = useState([]);
 
   const fetchData = useCallback(async () => {
     try {
-      const [txnRes, statsRes] = await Promise.all([
-        api.getTransactions(),
-        api.getStats(),
-      ]);
+      const [txnRes, statsRes] = await Promise.all([api.getTransactions(), api.getStats()]);
       setTransactions(txnRes.data);
       setStats(statsRes.data);
       setServerOnline(true);
@@ -318,225 +1125,266 @@ function App() {
   useEffect(() => {
     fetchData();
     socket.connect();
-
     socket.on('connect', () => setServerOnline(true));
     socket.on('disconnect', () => setServerOnline(false));
-
-    socket.on('txn:created', (newTxn) => {
-      setTransactions(prev => [newTxn, ...prev]);
-      api.getStats().then(res => setStats(res.data)).catch(console.error);
+    socket.on('txn:created', (t) => {
+      setTransactions(prev => [t, ...prev]);
+      api.getStats().then(r => setStats(r.data)).catch(() => {});
     });
-
-    socket.on('txn:updated', (updatedTxn) => {
-      setTransactions(prev => prev.map(t => t._id === updatedTxn._id ? updatedTxn : t));
-      // Also update the selected panel if it's the same transaction
-      setSelectedTxn(prev => prev && prev._id === updatedTxn._id ? updatedTxn : prev);
-      api.getStats().then(res => setStats(res.data)).catch(console.error);
+    socket.on('txn:updated', (t) => {
+      setTransactions(prev => prev.map(x => x._id === t._id ? t : x));
+      setSelectedTxn(prev => prev?._id === t._id ? t : prev);
+      setRecentBatch(prev => [...prev.filter(x => x._id !== t._id), t].slice(-10));
+      api.getStats().then(r => setStats(r.data)).catch(() => {});
     });
-
-    socket.on('batch:started', () => {
-      setBatchRunning(true);
-      setBatchProgress({ processed: 0, total: 0, success: 0, failed: 0 });
-    });
-    socket.on('batch:progress', (p) => {
-      setBatchProgress(p);
-      if (p.processed % 5 === 0) api.getStats().then(res => setStats(res.data)).catch(console.error);
-    });
-    socket.on('batch:completed', (p) => {
-      setBatchRunning(false);
-      setBatchProgress(p);
-      api.getStats().then(res => setStats(res.data)).catch(console.error);
-    });
+    socket.on('batch:started', () => { setBatchRunning(true); setBatchProgress({ processed:0,total:0,success:0,failed:0 }); setRecentBatch([]); });
+    socket.on('batch:progress', (p) => { setBatchProgress(p); if (p.processed % 5 === 0) api.getStats().then(r => setStats(r.data)).catch(() => {}); });
+    socket.on('batch:completed', (p) => { setBatchRunning(false); setBatchProgress(p); api.getStats().then(r => setStats(r.data)).catch(() => {}); });
     socket.on('batch:error', () => setBatchRunning(false));
-
+    socket.on('audit:created', (e) => setFeedEntries(prev => [...prev, { ...e, ts: new Date() }].slice(-20)));
     return () => {
-      socket.off('connect');
-      socket.off('disconnect');
-      socket.off('txn:created');
-      socket.off('txn:updated');
-      socket.off('batch:started');
-      socket.off('batch:progress');
-      socket.off('batch:completed');
-      socket.off('batch:error');
+      ['connect','disconnect','txn:created','txn:updated','batch:started','batch:progress','batch:completed','batch:error','audit:created']
+        .forEach(ev => socket.off(ev));
       socket.disconnect();
     };
   }, [fetchData]);
 
   const runBatch = async () => {
     if (batchRunning) return;
-    try {
-      await api.runBatch({ speedMultiplier: 10, concurrency: 5 });
-      // Response is immediate — progress streams via socket events
-    } catch (err) {
-      setError(err.message);
-      setBatchRunning(false);
-    }
+    try { await api.runBatch({ speedMultiplier: 10, concurrency: 5 }); }
+    catch (err) { setError(err.message); setBatchRunning(false); }
   };
 
   const simulatePayment = async () => {
-    const testPayloads = [
-      { customerName: 'Sparsh',       phone: '+918954003032', email: 'sparsh@example.com',  originalAmount: 4999,  errorCode: 'INSUFFICIENT_FUNDS', note: 'YOUR phone — soft decline' },
-      { customerName: 'Rahul Sharma', phone: '+918954003032', email: 'rahul@example.com',   originalAmount: 12500, errorCode: 'BANK_SERVER_DOWN',    note: 'YOUR phone — infra retry' },
-      { customerName: 'Priya Patel',  phone: '+918954003032', email: 'sparshchaudhary.jee@gmail.com',   originalAmount: 2999,  errorCode: 'CARD_EXPIRED',         note: 'YOUR phone — hard decline' },
+    const payloads = [
+      { customerName: 'Sparsh',       phone: '+918954003032', email: 'sparsh@example.com', originalAmount: 4999,  errorCode: 'INSUFFICIENT_FUNDS' },
+      { customerName: 'Rahul Sharma', phone: '+918954003032', email: 'rahul@example.com',  originalAmount: 12500, errorCode: 'BANK_SERVER_DOWN' },
+      { customerName: 'Priya Patel',  phone: '+918954003032', email: 'sparshchaudhary.jee@gmail.com', originalAmount: 2999, errorCode: 'CARD_EXPIRED' },
     ];
-    const { note, ...payload } = testPayloads[Math.floor(Math.random() * testPayloads.length)];
-    try {
-      await api.simulateFailedPayment(payload);
-    } catch (err) {
-      setError(err.message);
-    }
+    try { await api.simulateFailedPayment(payloads[Math.floor(Math.random() * payloads.length)]); }
+    catch (err) { setError(err.message); }
   };
 
-  return (
-    <div className={`min-h-screen bg-[var(--color-bg-primary)] transition-all ${selectedTxn ? 'pr-[420px]' : ''}`}>
-      <header className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]/80 backdrop-blur-xl sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div
-              className="w-10 h-10 rounded-xl bg-gradient-to-br from-[var(--color-pulse-red)] to-[var(--color-pulse-orange)] flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-[var(--color-pulse-red-glow)]"
-              style={{ animation: 'pulse-glow 2s ease-in-out infinite' }}
-            >
-              R
-            </div>
-            <div>
-              <h1 className="text-lg font-bold tracking-tight">
-                RecoverPulse<span className="text-[var(--color-pulse-red)]"> AI</span>
-              </h1>
-              <p className="text-xs text-[var(--color-text-muted)]">Autonomous Revenue Recovery</p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${serverOnline ? 'bg-green-500/15 text-green-400' : 'bg-red-500/15 text-red-400'}`}>
-              <span
-                className={`w-2 h-2 rounded-full ${serverOnline ? 'bg-green-400' : 'bg-red-400'}`}
-                style={{ animation: serverOnline ? 'pulse-glow 2s ease-in-out infinite' : 'none' }}
-              />
-              {serverOnline ? 'Server Online' : 'Server Offline'}
-            </div>
-            <button
-              onClick={runBatch}
-              disabled={!serverOnline || batchRunning}
-              className="px-4 py-2 bg-[var(--color-bg-card)] border border-[var(--color-border)] text-[var(--color-text-primary)] text-sm font-semibold rounded-lg hover:border-[var(--color-border-hover)] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
-            >
-              {batchRunning ? (
-                <>
-                  <div className="w-3 h-3 border border-[var(--color-pulse-blue)] border-t-transparent rounded-full animate-spin" />
-                  {batchProgress ? `${batchProgress.processed}/${batchProgress.total}` : 'Starting...'}
-                </>
-              ) : '⚡ Run Batch (50)'}
-            </button>
-            <button
-              onClick={simulatePayment}
-              disabled={!serverOnline}
-              className="px-4 py-2 bg-gradient-to-r from-[var(--color-pulse-red)] to-[var(--color-pulse-orange)] text-white text-sm font-semibold rounded-lg hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-[var(--color-pulse-red-glow)]"
-            >
-              Simulate Failed Payment
-            </button>
-          </div>
+  // ── Table ──
+  const TransactionTable = ({ compact = false }) => (
+    <div className="rounded-2xl overflow-hidden"
+      style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)' }}>
+      {loading ? (
+        <div className="flex items-center justify-center py-20">
+          <motion.div className="w-8 h-8 border-2 rounded-full"
+            style={{ borderColor: 'var(--color-pulse-red)', borderTopColor: 'transparent' }}
+            animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }} />
         </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-6 py-8">
-        {error && (
-          <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
-            {error}
-          </div>
-        )}
-
-        {/* Batch progress bar */}
-        {batchProgress && (
-          <div className="mb-6 p-4 rounded-xl bg-[var(--color-bg-card)] border border-[var(--color-border)]">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium text-[var(--color-text-primary)]">
-                {batchRunning ? '⚡ Batch Running...' : '✅ Batch Complete'}
-              </span>
-              <span className="text-xs font-[var(--font-mono)] text-[var(--color-text-muted)]">
-                {batchProgress.processed}/{batchProgress.total} · ✓ {batchProgress.success} · ✗ {batchProgress.failed}
-              </span>
-            </div>
-            <div className="w-full bg-[var(--color-bg-secondary)] rounded-full h-2 overflow-hidden">
-              <div
-                className="h-2 rounded-full transition-all duration-300"
-                style={{
-                  width: batchProgress.total ? `${(batchProgress.processed / batchProgress.total) * 100}%` : '0%',
-                  background: batchRunning
-                    ? 'linear-gradient(90deg, var(--color-pulse-blue), var(--color-pulse-purple))'
-                    : 'var(--color-pulse-green)',
-                }}
-              />
-            </div>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <StatCard label="Total Transactions" value={stats?.totalTransactions ?? 0} accent="text-[var(--color-text-primary)]" />
-          <StatCard label="Recovered"          value={stats?.recovered ?? 0}          accent="text-[var(--color-pulse-green)]" />
-          <StatCard label="Value at Risk"       value={`\u20B9${(stats?.grossValueAtRisk ?? 0).toLocaleString('en-IN')}`} accent="text-[var(--color-pulse-red)]" />
-          <StatCard label="Recovery Rate"       value={`${stats?.recoveryRate ?? 0}%`} accent="text-[var(--color-pulse-blue)]" />
+      ) : transactions.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 gap-3"
+          style={{ color: 'var(--color-text-muted)' }}>
+          <DollarSign size={32} opacity={0.25} />
+          <p className="text-sm">No failed payments detected</p>
+          <p className="text-xs opacity-60">Click "Simulate Failed Payment" to test</p>
         </div>
-
-        <div className="bg-[var(--color-bg-card)] border border-[var(--color-border)] rounded-xl overflow-hidden">
-          <div className="px-6 py-4 border-b border-[var(--color-border)] flex items-center justify-between">
-            <h2 className="text-base font-semibold">Failed Payments</h2>
-            <div className="flex items-center gap-3">
-              {selectedTxn && (
-                <span className="text-xs text-blue-400 font-[var(--font-mono)]">
-                  Agent panel open &rarr;
-                </span>
-              )}
-              <span className="text-xs text-[var(--color-text-muted)] font-[var(--font-mono)]">
-                {transactions.length} records &bull; click row to test agent
-              </span>
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="flex items-center justify-center py-20">
-              <div className="w-8 h-8 border-2 border-[var(--color-pulse-red)] border-t-transparent rounded-full animate-spin" />
-            </div>
-          ) : transactions.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 text-[var(--color-text-muted)]">
-              <p className="text-sm">No failed payments detected</p>
-              <p className="text-xs mt-1">Click &ldquo;Simulate Failed Payment&rdquo; to test the pipeline</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)] text-xs uppercase tracking-wider">
-                    <th className="py-3 px-4 text-left font-medium">Customer</th>
-                    <th className="py-3 px-4 text-left font-medium">Phone</th>
-                    <th className="py-3 px-4 text-left font-medium">Amount</th>
-                    <th className="py-3 px-4 text-left font-medium">Error Code</th>
-                    <th className="py-3 px-4 text-left font-medium">State</th>
-                    <th className="py-3 px-4 text-left font-medium">Time</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {transactions.map((txn) => (
-                    <TransactionRow
-                      key={txn._id}
-                      txn={txn}
-                      isSelected={selectedTxn?._id === txn._id}
-                      onClick={() => setSelectedTxn(prev => prev?._id === txn._id ? null : txn)}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="text-xs uppercase tracking-widest"
+                style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-muted)' }}>
+                {['Customer','Amount','Error Code','Root Cause','State','Time'].map(h => (
+                  <th key={h} className="py-3 px-4 text-left font-medium">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {transactions.map(txn => (
+                <TransactionRow key={txn._id} txn={txn}
+                  isSelected={selectedTxn?._id === txn._id}
+                  onClick={() => setSelectedTxn(prev => prev?._id === txn._id ? null : txn)} />
+              ))}
+            </tbody>
+          </table>
         </div>
-      </main>
-
-      {selectedTxn && (
-        <AgentPanel
-          txn={selectedTxn}
-          onClose={() => setSelectedTxn(null)}
-        />
       )}
     </div>
   );
-}
 
-export default App;
+  // ── Views ──
+  const views = {
+    overview: (
+      <>
+        {/* Stats */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <StatCard label="Total Transactions" value={stats?.totalTransactions ?? 0}
+            Icon={List} iconColor="#9ca3af" />
+          <StatCard label="Recovered" value={stats?.recovered ?? 0}
+            accent="#34d399" Icon={CheckCircle2} iconColor="#34d399" />
+          <StatCard label="Value at Risk"
+            value={`₹${(stats?.grossValueAtRisk ?? 0).toLocaleString('en-IN')}`}
+            accent="#f87171" Icon={DollarSign} iconColor="#f87171" />
+          <StatCard label="Recovery Rate" value={`${stats?.recoveryRate ?? 0}%`}
+            accent="#448aff" Icon={Percent} iconColor="#448aff" />
+        </div>
+
+        {/* Batch Monitor */}
+        <AnimatePresence>
+          {batchProgress && (
+            <BatchMonitor batchProgress={batchProgress} batchRunning={batchRunning} recentBatch={recentBatch} />
+          )}
+        </AnimatePresence>
+
+        {/* Pipeline */}
+        <RecoveryPipeline transactions={transactions} />
+
+        {/* Table + Feed */}
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+          <div className="xl:col-span-2">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-base font-semibold">Failed Payments</h2>
+              <span className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>
+                {transactions.length} records · click to inspect
+              </span>
+            </div>
+            <TransactionTable />
+          </div>
+          <div className="xl:col-span-1">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-base font-semibold">ReAct Agent Feed</h2>
+              <span className="text-xs px-2 py-0.5 rounded-full font-mono"
+                style={{ background: 'var(--color-bg-elevated)', color: 'var(--color-text-muted)' }}>
+                LIVE
+              </span>
+            </div>
+            <AgentFeedPanel feedEntries={feedEntries} />
+          </div>
+        </div>
+      </>
+    ),
+    transactions: (
+      <>
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-lg font-semibold">All Transactions</h2>
+          <span className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>
+            {transactions.length} total
+          </span>
+        </div>
+        <TransactionTable />
+      </>
+    ),
+    'agent-feed': (
+      <>
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-lg font-semibold">ReAct Agent Feed</h2>
+          <motion.button onClick={() => setFeedEntries([])}
+            className="text-xs px-3 py-1.5 rounded-lg transition-colors"
+            style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}
+            whileHover={{ borderColor: 'var(--color-border-hover)' }}>
+            Clear Feed
+          </motion.button>
+        </div>
+        <div className="max-w-3xl">
+          <AgentFeedPanel feedEntries={feedEntries} />
+        </div>
+      </>
+    ),
+    analytics: (
+      <AnalyticsView stats={stats} transactions={transactions} />
+    ),
+  };
+
+  return (
+    <div className="min-h-screen flex" style={{ background: 'var(--color-bg-primary)' }}>
+      <Sidebar active={activeView} onSelect={setActiveView} />
+
+      <div className="flex-1 flex flex-col transition-all duration-300"
+        style={{ marginLeft: 64, marginRight: selectedTxn ? 440 : 0 }}>
+
+        {/* Header */}
+        <header className="sticky top-0 z-40 backdrop-blur-xl"
+          style={{ background: 'rgba(10,10,15,0.88)', borderBottom: '1px solid var(--color-border)' }}>
+          <div className="px-6 py-3.5 flex items-center justify-between">
+            <div>
+              <h1 className="text-base font-bold tracking-tight">Recovery Command Center</h1>
+              <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Autonomous Revenue Recovery · RecoverPulse AI</p>
+            </div>
+            <div className="flex items-center gap-3">
+              {/* Server */}
+              <motion.div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium"
+                style={{
+                  background: serverOnline ? 'rgba(52,211,153,0.1)' : 'rgba(248,113,113,0.1)',
+                  color: serverOnline ? '#34d399' : '#f87171',
+                }}
+                animate={{ opacity: [1, 0.85, 1] }} transition={{ duration: 2, repeat: Infinity }}>
+                {serverOnline ? <Wifi size={12} /> : <WifiOff size={12} />}
+                {serverOnline ? 'Server Online' : 'Server Offline'}
+              </motion.div>
+
+              {/* Run Batch */}
+              <motion.button disabled={!serverOnline || batchRunning} onClick={runBatch}
+                className="px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2"
+                style={{
+                  background: 'transparent',
+                  border: '1px solid var(--color-border)',
+                  color: 'var(--color-text-primary)',
+                  opacity: !serverOnline || batchRunning ? 0.4 : 1,
+                  cursor: !serverOnline || batchRunning ? 'not-allowed' : 'pointer',
+                }}
+                whileHover={serverOnline && !batchRunning ? { borderColor: 'var(--color-border-hover)' } : {}}
+                whileTap={serverOnline && !batchRunning ? { scale: 0.97 } : {}}>
+                {batchRunning ? (
+                  <>
+                    <motion.div className="w-3 h-3 border-2 rounded-full"
+                      style={{ borderColor: '#448aff', borderTopColor: 'transparent' }}
+                      animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }} />
+                    {batchProgress ? `${batchProgress.processed}/${batchProgress.total}` : 'Starting...'}
+                  </>
+                ) : <><Zap size={14} /> Run Batch (50)</>}
+              </motion.button>
+
+              {/* Simulate */}
+              <motion.button disabled={!serverOnline} onClick={simulatePayment}
+                className="px-4 py-2 rounded-xl text-sm font-semibold text-white"
+                style={{
+                  background: 'linear-gradient(135deg,var(--color-pulse-red),var(--color-pulse-orange))',
+                  boxShadow: '0 4px 20px rgba(255,59,92,0.3)',
+                  opacity: !serverOnline ? 0.4 : 1,
+                  cursor: !serverOnline ? 'not-allowed' : 'pointer',
+                }}
+                whileHover={{ scale: 1.03, boxShadow: '0 4px 28px rgba(255,59,92,0.45)' }}
+                whileTap={{ scale: 0.97 }}>
+                Simulate Failed Payment
+              </motion.button>
+            </div>
+          </div>
+        </header>
+
+        {/* Error bar */}
+        <AnimatePresence>
+          {error && (
+            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="px-6 py-3 text-sm flex items-center gap-2"
+              style={{ background: 'rgba(248,113,113,0.1)', borderBottom: '1px solid rgba(248,113,113,0.25)', color: '#f87171' }}>
+              <AlertTriangle size={14} />
+              {error}
+              <button onClick={() => setError(null)} className="ml-auto"><X size={14} /></button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Content */}
+        <main className="flex-1 px-6 py-6">
+          <AnimatePresence mode="wait">
+            <motion.div key={activeView}
+              initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2 }}>
+              {views[activeView] || views.overview}
+            </motion.div>
+          </AnimatePresence>
+        </main>
+      </div>
+
+      {/* Agent Panel */}
+      <AnimatePresence>
+        {selectedTxn && <AgentPanel key={selectedTxn._id} txn={selectedTxn} onClose={() => setSelectedTxn(null)} />}
+      </AnimatePresence>
+    </div>
+  );
+}
