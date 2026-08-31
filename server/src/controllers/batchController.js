@@ -59,7 +59,6 @@ function createLimiter(concurrency) {
 
 async function processSeedRecord(record, io) {
   try {
-    // Strip the internal _scenario field before validation
     const { _scenario, ...payload } = record;
 
     const validation = validatePaymentPayload(payload);
@@ -70,7 +69,6 @@ async function processSeedRecord(record, io) {
 
     const { sanitized } = validation;
 
-    // Create transaction
     const txn = await TransactionRecord.create({
       ...sanitized,
       state: 'FAILED_PAYMENT_INGESTED',
@@ -78,12 +76,10 @@ async function processSeedRecord(record, io) {
 
     if (io) io.emit('txn:created', txn.toObject());
 
-    // Triage
     const category = classifyErrorCode(txn.errorCode);
     txn.errorCategory = category;
 
     if (category === 'infra') {
-      // Silent retry — don't fire agent, just schedule
       txn.state = getNextState(txn.state, 'RETRY_SCHEDULED');
       txn.retryCount = 1;
       await txn.save();
@@ -91,20 +87,27 @@ async function processSeedRecord(record, io) {
       return { success: true, txnId: txn._id, category, action: 'silent_retry' };
     }
 
-    // Soft or hard decline — transition to outreach
     txn.state = getNextState(txn.state, 'OUTREACH_INITIATED');
     await txn.save();
     if (io) io.emit('txn:updated', txn.toObject());
 
-    // For dispute_likely records — simulate a dispute keyword response
-    // so the batch demo shows all FSM paths including escalation
     if (_scenario === 'dispute_likely') {
-      await runAgentTurn(txn._id.toString(), 'I already cancelled this, stop messaging me');
+      // Non-throwing — dispute keyword is caught by regex pre-filter in runAgentTurn
+      try {
+        await runAgentTurn(txn._id.toString(), 'I already cancelled this, stop messaging me');
+      } catch (err) {
+        console.warn('[Batch] Dispute escalation failed for', txn._id.toString(), ':', err.message);
+      }
       return { success: true, txnId: txn._id, category, action: 'escalated_dispute' };
     }
 
-    // Fire initial agent turn — PAYMENT_FAILED trigger
-    await runAgentTurn(txn._id.toString(), 'PAYMENT_FAILED');
+    // Fire initial agent turn — errors are caught and logged, not thrown
+    try {
+      await runAgentTurn(txn._id.toString(), 'PAYMENT_FAILED');
+    } catch (err) {
+      console.warn('[Batch] Agent turn failed for', txn._id.toString(), ':', err.message);
+      // Transaction stays in OUTREACH_INITIATED — poller or manual retry can handle it
+    }
     return { success: true, txnId: txn._id, category, action: 'agent_outreach' };
 
   } catch (err) {

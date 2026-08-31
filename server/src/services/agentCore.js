@@ -2,18 +2,18 @@
 
 /**
  * @file services/agentCore.js
- * @description The ReAct (Reason + Act) agent loop powered by Groq LLM.
+ * @description The ReAct (Reason + Act) agent loop — Gemini 2.0 Flash.
  *
  * Loop per turn:
  *   1. Load context  — fetch TransactionRecord + conversation history
- *   2. Pre-check     — fast regex screen for dispute/opt-out keywords (before LLM)
- *   3. THOUGHT       — Groq LLM call: given context, choose a tool
- *   4. ACTION        — execute the chosen tool stub
+ *   2. Pre-check     — fast regex screen for dispute/opt-out keywords
+ *   3. THOUGHT       — Gemini LLM call: given context, choose a tool
+ *   4. ACTION        — execute the chosen tool
  *   5. OBSERVATION   — capture tool result
  *   6. Persist+Emit  — write AgentAuditLog, emit txn:updated via Socket.IO
  */
 
-const Groq = require('groq-sdk');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const TransactionRecord   = require('../models/TransactionRecord');
 const ConversationMessage = require('../models/ConversationMessage');
@@ -22,9 +22,8 @@ const socket              = require('../config/socket');
 const { TOOL_SCHEMAS, executeTool } = require('./agentTools');
 const { reviewAction } = require('./complianceCop');
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-
-const MODEL = 'openai/gpt-oss-120b';
+const genAI = new GoogleGenerativeAI(process.env.GROQ_API_KEY);
+const MODEL = 'gemini-2.5-flash';
 
 // Regex pre-filter — fast check before touching the LLM.
 // If any of these match, immediately escalate without an LLM call.
@@ -173,40 +172,74 @@ async function runAgentTurn(transactionId, inboundMessage) {
     return { toolName: 'escalate_to_human', observation: 'Escalated (stopping rule).', auditLogIds };
   }
 
-  // Step 3: THOUGHT — call Groq LLM
-  console.log('[Agent] Calling Groq for txn', transactionId, '| message:', inboundMessage);
+  // Step 3: THOUGHT — call Gemini
+  console.log('[Agent] Calling Gemini for txn', transactionId, '| message:', inboundMessage);
 
   const isInitialTrigger = inboundMessage === 'PAYMENT_FAILED';
-  const systemPrompt = buildSystemPrompt(txn, isInitialTrigger);
 
-  // For initial trigger, don't include it as a user message — the system prompt already explains the context
-  const conversationHistory = isInitialTrigger
-    ? []
-    : buildConversationMessages(history, inboundMessage);
-
-  let groqResponse;
-  try {
-    groqResponse = await groq.chat.completions.create({
-      model: MODEL,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        // For initial trigger, add a minimal user message so the model has something to respond to
-        ...(isInitialTrigger
-          ? [{ role: 'user', content: 'Payment failed. Start outreach.' }]
-          : conversationHistory
-        ),
-      ],
-      tools: TOOL_SCHEMAS,
-      tool_choice: 'auto',
-      temperature: 0.3,
-      max_tokens: 1024,
-    });
-  } catch (err) {
-    throw new Error('Groq API error: ' + err.message);
+  // Build conversation history for Gemini format
+  const geminiContents = [];
+  if (!isInitialTrigger) {
+    for (const msg of history) {
+      geminiContents.push({
+        role:  msg.direction === 'inbound' ? 'user' : 'model',
+        parts: [{ text: msg.body }],
+      });
+    }
+    geminiContents.push({ role: 'user', parts: [{ text: inboundMessage }] });
+  } else {
+    geminiContents.push({ role: 'user', parts: [{ text: 'Payment failed. Start outreach.' }] });
   }
 
-  const choice = groqResponse.choices[0];
-  const thoughtText = choice.message.content || 'LLM selected a tool.';
+  let geminiResponse;
+  try {
+    let lastError;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const model = genAI.getGenerativeModel({
+          model: MODEL,
+          systemInstruction: buildSystemPrompt(txn, isInitialTrigger),
+          tools: [{
+            functionDeclarations: TOOL_SCHEMAS.map(t => ({
+              name:        t.function.name,
+              description: t.function.description,
+              parameters:  t.function.parameters,
+            })),
+          }],
+          generationConfig: { temperature: 0.3, maxOutputTokens: 1024 },
+        });
+        geminiResponse = await model.generateContent({ contents: geminiContents });
+        break;
+      } catch (err) {
+        lastError = err;
+        const isRateLimit = err.status === 429 || String(err.message).includes('429') || String(err.message).includes('quota');
+        if (isRateLimit && attempt < 2) {
+          const delay = (attempt + 1) * 8000;
+          console.warn('[Agent] Gemini rate limit, retrying in', delay + 'ms');
+          await new Promise(r => setTimeout(r, delay));
+        } else {
+          throw err;
+        }
+      }
+    }
+    if (!geminiResponse) throw lastError;
+  } catch (err) {
+    console.error('[Agent] Gemini API error for txn', transactionId, ':', err.message);
+    await logStep(transactionId, {
+      step: 'OBSERVATION', toolName: 'gemini_api_error',
+      toolInput: { inboundMessage }, toolOutput: { error: err.message }, error: err.message,
+    });
+    const io = socket.getIO();
+    if (io) io.emit('audit:created', { transactionId, toolName: 'gemini_api_error', observation: 'Gemini API unavailable: ' + err.message + '. Agent turn skipped.' });
+    return { toolName: 'gemini_api_error', observation: 'Gemini API error: ' + err.message, auditLogIds };
+  }
+
+  // Parse Gemini response — getGenerativeModel returns response.response
+  const resp      = geminiResponse.response;
+  const candidate = resp.candidates?.[0];
+  const parts     = candidate?.content?.parts || [];
+  const thoughtText = parts.find(p => p.text)?.text || 'Gemini selected a tool.';
+  const funcPart    = parts.find(p => p.functionCall);
 
   // Log THOUGHT step
   const thoughtLog = await logStep(transactionId, {
@@ -215,24 +248,15 @@ async function runAgentTurn(transactionId, inboundMessage) {
   });
   auditLogIds.push(thoughtLog._id.toString());
 
-  // Step 4: ACTION — parse the tool call
-  // Fallback: if LLM returned plain text instead of a tool call, treat it as a WhatsApp message
-  const toolCalls = choice.message.tool_calls;
+  // Step 4: ACTION — parse function call
   let toolName, toolArgs;
-
-  if (!toolCalls || toolCalls.length === 0) {
-    // LLM chose to respond with text — send it as a WhatsApp message
-    console.log('[Agent] LLM returned text (no tool call) — routing to send_whatsapp_message');
+  if (!funcPart) {
+    console.log('[Agent] Gemini returned text (no function call) — routing to send_whatsapp_message');
     toolName = 'send_whatsapp_message';
     toolArgs = { message: thoughtText || 'Namaskar! Aapka payment issue resolve karne mein hum madad karna chahte hain.' };
   } else {
-    const toolCall = toolCalls[0];
-    toolName = toolCall.function.name;
-    try {
-      toolArgs = JSON.parse(toolCall.function.arguments);
-    } catch {
-      throw new Error('Failed to parse tool arguments: ' + toolCall.function.arguments);
-    }
+    toolName = funcPart.functionCall.name;
+    toolArgs  = funcPart.functionCall.args || {};
   }
 
   console.log('[Agent] LLM chose tool:', toolName, '| args:', JSON.stringify(toolArgs));

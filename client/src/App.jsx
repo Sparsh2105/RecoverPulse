@@ -136,28 +136,43 @@ function Sidebar({ active, onSelect }) {
 // ─────────────────────────────────────────────
 // Stat Card
 // ─────────────────────────────────────────────
-function StatCard({ label, value, accent = 'var(--color-text-primary)', Icon: CardIcon, iconColor, trend }) {
+function StatCard({ label, value, accent = 'var(--color-text-primary)', Icon: CardIcon, iconColor, trend, gradient }) {
   return (
     <motion.div
-      className="rounded-2xl p-5 flex flex-col gap-3"
-      style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)' }}
+      className="rounded-2xl p-5 flex flex-col gap-3 relative overflow-hidden"
+      style={{
+        background: gradient || 'var(--color-bg-card)',
+        border: '1px solid var(--color-border)',
+      }}
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      whileHover={{ borderColor: 'var(--color-border-hover)', y: -2 }}
+      whileHover={{ borderColor: iconColor ? `${iconColor}50` : 'var(--color-border-hover)', y: -2 }}
       transition={{ duration: 0.25 }}
     >
-      <div className="flex items-center justify-between">
+      {/* Subtle background glow orb */}
+      {iconColor && (
+        <div className="absolute -right-4 -top-4 w-20 h-20 rounded-full opacity-10 pointer-events-none"
+          style={{ background: iconColor, filter: 'blur(16px)' }} />
+      )}
+      <div className="flex items-center justify-between relative z-10">
         <p className="text-xs uppercase tracking-widest" style={{ color: 'var(--color-text-muted)' }}>{label}</p>
         {CardIcon && (
           <div className="w-8 h-8 rounded-lg flex items-center justify-center"
-            style={{ background: `${iconColor}15` }}>
+            style={{ background: `${iconColor}20`, border: `1px solid ${iconColor}30` }}>
             <CardIcon size={15} style={{ color: iconColor }} />
           </div>
         )}
       </div>
-      <p className="text-3xl font-bold font-mono" style={{ color: accent }}>{value}</p>
+      {/* Auto-scale value text to prevent overflow */}
+      <p className="font-bold font-mono leading-none relative z-10 truncate"
+        style={{
+          color: accent,
+          fontSize: String(value).length > 12 ? '1.25rem' : String(value).length > 8 ? '1.6rem' : '1.875rem',
+        }}>
+        {value}
+      </p>
       {trend !== undefined && (
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 relative z-10">
           {trend >= 0
             ? <TrendingUp size={13} className="text-emerald-400" />
             : <TrendingDown size={13} className="text-red-400" />}
@@ -183,7 +198,10 @@ function RecoveryPipeline({ transactions }) {
 
   return (
     <div className="rounded-2xl p-5 mb-6"
-      style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)' }}>
+      style={{
+        background: 'linear-gradient(135deg, var(--color-bg-card) 0%, rgba(68,138,255,0.04) 100%)',
+        border: '1px solid var(--color-border)',
+      }}>
       <p className="text-xs font-semibold uppercase tracking-widest mb-5" style={{ color: 'var(--color-text-muted)' }}>
         Recovery Pipeline
       </p>
@@ -1213,14 +1231,18 @@ export default function App() {
         {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <StatCard label="Total Transactions" value={stats?.totalTransactions ?? 0}
-            Icon={List} iconColor="#9ca3af" />
+            Icon={List} iconColor="#9ca3af"
+            gradient="linear-gradient(135deg, var(--color-bg-card) 0%, rgba(156,163,175,0.05) 100%)" />
           <StatCard label="Recovered" value={stats?.recovered ?? 0}
-            accent="#34d399" Icon={CheckCircle2} iconColor="#34d399" />
+            accent="#34d399" Icon={CheckCircle2} iconColor="#34d399"
+            gradient="linear-gradient(135deg, var(--color-bg-card) 0%, rgba(52,211,153,0.06) 100%)" />
           <StatCard label="Value at Risk"
             value={`₹${(stats?.grossValueAtRisk ?? 0).toLocaleString('en-IN')}`}
-            accent="#f87171" Icon={DollarSign} iconColor="#f87171" />
+            accent="#f87171" Icon={DollarSign} iconColor="#f87171"
+            gradient="linear-gradient(135deg, var(--color-bg-card) 0%, rgba(248,113,113,0.06) 100%)" />
           <StatCard label="Recovery Rate" value={`${stats?.recoveryRate ?? 0}%`}
-            accent="#448aff" Icon={Percent} iconColor="#448aff" />
+            accent="#448aff" Icon={Percent} iconColor="#448aff"
+            gradient="linear-gradient(135deg, var(--color-bg-card) 0%, rgba(68,138,255,0.06) 100%)" />
         </div>
 
         {/* Batch Monitor */}

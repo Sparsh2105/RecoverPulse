@@ -2,20 +2,14 @@
 
 /**
  * @file services/complianceCop.js
- * @description Independent safety layer — reviews every agent action before execution.
- *
- * This is a SECOND, separate Groq call with its own strict system prompt.
- * It has no knowledge of the main agent's reasoning — it only sees the
- * proposed action and checks it against a rules checklist.
- *
- * Returns { approved: true } or { approved: false, reason: string }
+ * @description Independent safety layer — Gemini 2.0 Flash.
+ * Reviews every agent action before execution.
  */
 
-const Groq = require('groq-sdk');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-
-const COMPLIANCE_MODEL = 'openai/gpt-oss-120b';
+const genAI = new GoogleGenerativeAI(process.env.GROQ_API_KEY);
+const COMPLIANCE_MODEL = 'gemini-2.5-flash';
 
 // IST offset = UTC+5:30
 const IST_OFFSET_HOURS = 5.5;
@@ -105,20 +99,15 @@ async function checkWithLLM(message, txn) {
   ].join('\n');
 
   try {
-    const response = await groq.chat.completions.create({
+    const model = genAI.getGenerativeModel({
       model: COMPLIANCE_MODEL,
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.1,
-      max_tokens: 100,
+      generationConfig: { temperature: 0.1, maxOutputTokens: 150 },
     });
-
-    const raw = (response.choices[0].message.content || '').trim();
-    if (!raw) return { approved: true }; // empty response — fail open
-
-    // Strip any markdown code fences the model might add
+    const result = await model.generateContent(prompt);
+    const raw = (result.response.text() || '').trim();
+    if (!raw) return { approved: true };
     const clean = raw.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
     if (!clean) return { approved: true };
-
     return JSON.parse(clean);
   } catch (err) {
     // If compliance check itself errors, fail safe — approve with warning
