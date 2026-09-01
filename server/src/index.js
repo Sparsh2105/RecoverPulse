@@ -21,7 +21,21 @@ app.set('io', io);
 
 app.use(helmet());
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  origin: function(origin, callback) {
+    // Allow requests with no origin (mobile apps, curl, Postman)
+    if (!origin) return callback(null, true);
+    const allowed = process.env.CLIENT_URL || 'http://localhost:5173';
+    // Strip any trailing whitespace/newlines from env var
+    const cleanAllowed = allowed.trim();
+    // In development or if wildcard, allow all
+    if (cleanAllowed === '*' || process.env.NODE_ENV !== 'production') {
+      return callback(null, true);
+    }
+    if (origin === cleanAllowed || origin.endsWith('.vercel.app') || origin.endsWith('.onrender.com')) {
+      return callback(null, true);
+    }
+    return callback(null, true); // temporarily allow all during initial deploy
+  },
   credentials: true,
 }));
 // localtunnel bypass header — lets Twilio webhooks through without browser confirmation page

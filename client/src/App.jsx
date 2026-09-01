@@ -622,7 +622,7 @@ function AgentPanel({ txn, onClose }) {
     setSending(true);
     addLog('user', m);
     try {
-      const res = await fetch('/api/agent/process', {
+      const res = await fetch((import.meta.env.VITE_API_URL || '') + '/api/agent/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transactionId: txn._id, inboundMessage: m }),

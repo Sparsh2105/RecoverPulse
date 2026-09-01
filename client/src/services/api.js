@@ -1,4 +1,8 @@
-const API_BASE = '/api';
+// In production (Vercel), VITE_API_URL is set to the Render backend URL.
+// In development, requests go to /api which Vite proxies to localhost:5000.
+const API_BASE = import.meta.env.VITE_API_URL
+  ? import.meta.env.VITE_API_URL + '/api'
+  : '/api';
 
 /**
  * Generic fetch wrapper with error handling
