@@ -6,6 +6,7 @@ import {
   Zap, Wifi, WifiOff, Shield, Brain, Eye, AlertTriangle,
   MessageSquare, Clock, DollarSign, Percent, ArrowRight,
   RefreshCw, UserCheck, XCircle, CheckCircle, Info,
+  CalendarClock, IndianRupee, Timer,
 } from 'lucide-react';
 import api from './services/api';
 import socket from './services/socket';
@@ -69,10 +70,11 @@ function getErrorCategory(errorCode) {
 // Sidebar
 // ─────────────────────────────────────────────
 const NAV = [
-  { id: 'overview',     label: 'Overview',     Icon: LayoutDashboard },
-  { id: 'transactions', label: 'Transactions', Icon: List },
-  { id: 'agent-feed',   label: 'Agent Feed',   Icon: Activity },
-  { id: 'analytics',    label: 'Analytics',    Icon: BarChart2 },
+  { id: 'overview',     label: 'Overview',           Icon: LayoutDashboard },
+  { id: 'transactions', label: 'Transactions',        Icon: List },
+  { id: 'p2p-tracker',  label: 'Promise-to-Pay',      Icon: CalendarClock },
+  { id: 'agent-feed',   label: 'Agent Feed',           Icon: Activity },
+  { id: 'analytics',    label: 'Analytics',            Icon: BarChart2 },
 ];
 
 function Sidebar({ active, onSelect }) {
@@ -940,6 +942,184 @@ function AgentPanel({ txn, onClose }) {
 }
 
 // ─────────────────────────────────────────────
+// Promise-to-Pay Tracker
+// ─────────────────────────────────────────────
+function PromiseToPayTracker({ transactions, onSelectTxn }) {
+  const mandates = transactions
+    .filter(t => t.state === 'MANDATE_PENDING_AUTH' && t.promisedDate)
+    .sort((a, b) => new Date(a.promisedDate) - new Date(b.promisedDate));
+
+  const noDate = transactions.filter(t => t.state === 'MANDATE_PENDING_AUTH' && !t.promisedDate);
+  const allMandates = [...mandates, ...noDate];
+
+  const totalCommitted = allMandates.reduce((sum, t) => sum + (t.originalAmount || 0), 0);
+
+  function getDueInfo(promisedDate) {
+    if (!promisedDate) return { label: 'No date set', color: '#9ca3af', bg: 'rgba(156,163,175,0.1)', days: null };
+    const now  = new Date();
+    const due  = new Date(promisedDate);
+    const diff = Math.ceil((due - now) / (1000 * 60 * 60 * 24));
+    if (diff < 0)  return { label: `${Math.abs(diff)}d overdue`, color: '#f87171', bg: 'rgba(248,113,113,0.12)', days: diff };
+    if (diff === 0) return { label: 'Due today',                  color: '#fb923c', bg: 'rgba(251,146,60,0.12)',  days: 0 };
+    if (diff <= 3)  return { label: `${diff}d left`,              color: '#fb923c', bg: 'rgba(251,146,60,0.1)',   days: diff };
+    if (diff <= 7)  return { label: `${diff}d left`,              color: '#fbbf24', bg: 'rgba(251,191,36,0.1)',   days: diff };
+    return               { label: `${diff}d left`,              color: '#34d399', bg: 'rgba(52,211,153,0.1)',   days: diff };
+  }
+
+  return (
+    <>
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <h2 className="text-lg font-semibold">Promise-to-Pay Tracker</h2>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
+            UPI mandates awaiting customer authorization, sorted by due date
+          </p>
+        </div>
+        <span className="text-xs px-2.5 py-1 rounded-full font-mono"
+          style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>
+          {allMandates.length} mandates
+        </span>
+      </div>
+
+      {/* Summary cards */}
+      <div className="grid grid-cols-3 gap-4 mb-6">
+        {[
+          { label: 'Total Committed',  value: `₹${totalCommitted.toLocaleString('en-IN')}`, color: '#c084fc', Icon: IndianRupee },
+          { label: 'Pending Auth',     value: allMandates.length,                            color: '#60a5fa', Icon: Timer },
+          { label: 'Due This Week',    value: mandates.filter(t => { const d = getDueInfo(t.promisedDate); return d.days !== null && d.days >= 0 && d.days <= 7; }).length, color: '#fbbf24', Icon: CalendarClock },
+        ].map(s => (
+          <motion.div key={s.label} className="rounded-2xl p-5 relative overflow-hidden"
+            style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)' }}
+            whileHover={{ borderColor: `${s.color}40`, y: -2 }} transition={{ duration: 0.2 }}>
+            <div className="absolute -right-3 -top-3 w-16 h-16 rounded-full opacity-10"
+              style={{ background: s.color, filter: 'blur(12px)' }} />
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs uppercase tracking-widest" style={{ color: 'var(--color-text-muted)' }}>{s.label}</p>
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: `${s.color}20` }}>
+                <s.Icon size={13} style={{ color: s.color }} />
+              </div>
+            </div>
+            <p className="text-3xl font-bold font-mono" style={{ color: s.color }}>{s.value}</p>
+          </motion.div>
+        ))}
+      </div>
+
+      {/* Timeline list */}
+      {allMandates.length === 0 ? (
+        <div className="rounded-2xl flex flex-col items-center justify-center py-20 gap-3"
+          style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>
+          <CalendarClock size={32} opacity={0.25} />
+          <p className="text-sm">No pending mandates</p>
+          <p className="text-xs opacity-60">Run a batch or trigger UPI mandate scenarios to populate this view</p>
+        </div>
+      ) : (
+        <div className="rounded-2xl overflow-hidden"
+          style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)' }}>
+          <div className="px-5 py-3 flex items-center gap-2"
+            style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)' }}>
+            {[
+              { color: '#34d399', label: '>7 days' },
+              { color: '#fbbf24', label: '3–7 days' },
+              { color: '#fb923c', label: '<3 days' },
+              { color: '#f87171', label: 'Overdue' },
+            ].map(l => (
+              <div key={l.label} className="flex items-center gap-1.5 mr-4">
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: l.color }} />
+                <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{l.label}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
+            {allMandates.map((txn, i) => {
+              const due     = getDueInfo(txn.promisedDate);
+              const isOverdue = due.days !== null && due.days < 0;
+
+              return (
+                <motion.div key={txn._id}
+                  initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.03 }}
+                  className="flex items-center gap-4 px-5 py-4 cursor-pointer transition-colors"
+                  style={{ background: 'transparent' }}
+                  onClick={() => onSelectTxn(txn)}
+                  whileHover={{ backgroundColor: 'rgba(255,255,255,0.02)' }}>
+
+                  {/* Due date indicator */}
+                  <div className="flex-shrink-0 w-14 text-center">
+                    {txn.promisedDate ? (
+                      <>
+                        <p className="text-lg font-bold font-mono leading-none" style={{ color: due.color }}>
+                          {new Date(txn.promisedDate).getDate()}
+                        </p>
+                        <p className="text-xs" style={{ color: due.color, opacity: 0.8 }}>
+                          {new Date(txn.promisedDate).toLocaleDateString('en-IN', { month: 'short' })}
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>No date</p>
+                    )}
+                  </div>
+
+                  {/* Vertical timeline line */}
+                  <div className="flex-shrink-0 flex flex-col items-center" style={{ height: 40 }}>
+                    <motion.div className="w-3 h-3 rounded-full border-2"
+                      style={{ background: due.bg, borderColor: due.color }}
+                      animate={isOverdue ? { scale: [1, 1.3, 1] } : {}}
+                      transition={{ duration: 1.5, repeat: Infinity }} />
+                    {i < allMandates.length - 1 && (
+                      <div className="w-px flex-1 mt-1" style={{ background: 'var(--color-border)' }} />
+                    )}
+                  </div>
+
+                  {/* Customer info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+                        style={{ background: 'linear-gradient(135deg,#c084fc,#448aff)', fontSize: 9 }}>
+                        {txn.customerName?.[0]?.toUpperCase() || '?'}
+                      </div>
+                      <span className="text-sm font-medium truncate" style={{ color: 'var(--color-text-primary)' }}>
+                        {txn.customerName}
+                      </span>
+                      {txn.mandateId && (
+                        <span className="text-xs px-1.5 py-0.5 rounded font-mono"
+                          style={{ background: 'rgba(192,132,252,0.1)', color: '#c084fc', fontSize: 10 }}>
+                          {txn.mandateId.slice(0, 14)}...
+                        </span>
+                      )}
+                    </div>
+                    {txn.promisedDate && (
+                      <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                        Promised: {new Date(txn.promisedDate).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Amount + status */}
+                  <div className="flex-shrink-0 text-right">
+                    <p className="text-sm font-bold font-mono" style={{ color: 'var(--color-pulse-orange)' }}>
+                      ₹{txn.originalAmount.toLocaleString('en-IN')}
+                    </p>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-medium mt-1"
+                      style={{ background: due.bg, color: due.color }}>
+                      <Clock size={9} />
+                      {due.label}
+                    </span>
+                  </div>
+
+                  {/* Arrow */}
+                  <ChevronRight size={14} style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} />
+                </motion.div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────
 // Analytics View (Day 9)
 // ─────────────────────────────────────────────
 function AnalyticsView({ stats, transactions }) {
@@ -1305,6 +1485,12 @@ export default function App() {
           <AgentFeedPanel feedEntries={feedEntries} />
         </div>
       </>
+    ),
+    'p2p-tracker': (
+      <PromiseToPayTracker
+        transactions={transactions}
+        onSelectTxn={txn => setSelectedTxn(prev => prev?._id === txn._id ? null : txn)}
+      />
     ),
     analytics: (
       <AnalyticsView stats={stats} transactions={transactions} />

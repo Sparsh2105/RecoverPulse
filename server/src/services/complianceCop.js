@@ -137,7 +137,12 @@ async function reviewAction(toolName, toolArgs, txn) {
   }
 
   // LLM tone/content check — only for outbound messages
+  // Skip during batch runs (SKIP_LLM_COMPLIANCE=true) to avoid rate limits.
+  // Hard rules above already enforce the critical safety constraints.
   if (toolName === 'send_whatsapp_message' && toolArgs.message) {
+    if (process.env.SKIP_LLM_COMPLIANCE === 'true') {
+      return { approved: true }; // hard rules passed — safe to skip LLM tone check in batch
+    }
     const llmVerdict = await checkWithLLM(toolArgs.message, txn);
     if (!llmVerdict.approved) {
       console.log('[ComplianceCop] LLM REJECTED message:', llmVerdict.reason);
@@ -145,7 +150,7 @@ async function reviewAction(toolName, toolArgs, txn) {
     return llmVerdict;
   }
 
-  // All other tools (generate_payment_link, generate_upi_mandate, etc.) are approved
+  // All other tools approved
   return { approved: true };
 }
 

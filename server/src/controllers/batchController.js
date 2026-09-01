@@ -129,8 +129,8 @@ async function runBatch(req, res) {
     });
   }
 
-  const concurrency     = Math.min(10, Math.max(1, parseInt(req.body.concurrency, 10) || 5));
-  const speedMultiplier = Math.min(100, Math.max(1, parseFloat(req.body.speedMultiplier) || 1));
+  const concurrency     = Math.min(5, Math.max(1, parseInt(req.body.concurrency, 10) || 2));
+  const speedMultiplier = Math.min(100, Math.max(1, parseFloat(req.body.speedMultiplier) || 3));
 
   let records;
   try {
@@ -155,6 +155,10 @@ async function runBatch(req, res) {
 
   // Emit batch start event
   if (io) io.emit('batch:started', { total: records.length, concurrency, speedMultiplier });
+
+  // Skip LLM compliance tone check during batch to avoid Gemini rate limits.
+  // Hard rules (contact window, outreach cap, discount bounds) still enforce safety.
+  process.env.SKIP_LLM_COMPLIANCE = 'true';
 
   // Run with concurrency limit + inter-record delay based on speed multiplier
   const limit   = createLimiter(concurrency);
@@ -187,9 +191,11 @@ async function runBatch(req, res) {
 
   Promise.all(tasks).then(() => {
     console.log('[Batch] Complete:', results);
+    process.env.SKIP_LLM_COMPLIANCE = 'false'; // restore compliance cop LLM check
     if (io) io.emit('batch:completed', results);
   }).catch(err => {
     console.error('[Batch] Fatal error:', err.message);
+    process.env.SKIP_LLM_COMPLIANCE = 'false';
     if (io) io.emit('batch:error', { error: err.message });
   });
 }
