@@ -550,6 +550,66 @@ function AgentPanel({ txn, onClose }) {
       .finally(() => setLoadingHistory(false));
   }, [txn._id]);
 
+  // Hinglish voice note — auto-plays when an escalated transaction is opened
+  useEffect(() => {
+    if (!['ESCALATED_TO_HUMAN', 'STOPPING_RULE_TRIGGERED'].includes(txn.state)) return;
+    if (!window.speechSynthesis) return;
+
+    window.speechSynthesis.cancel();
+
+    const reason = txn.escalationReason
+      ? txn.escalationReason.replace(/_/g, ' ').replace('compliance violation:', '').trim()
+      : 'agent ke paas bheja gaya hai';
+
+    const text =
+      `${txn.customerName} ji ka Rs. ${txn.originalAmount} ka payment fail hua hai. ` +
+      `Humne is case ko human agent ke paas escalate kar diya hai. ` +
+      `${reason === 'dispute_or_opt_out_detected' || reason.includes('dispute')
+        ? 'Customer ne dispute ya opt-out request kiya hai.'
+        : reason.includes('compliance')
+          ? 'Compliance violation detected tha.'
+          : `Reason hai: ${reason}.`} ` +
+      `Please is customer ko personally contact karein aur matter resolve karein. Thank you.`;
+
+    function speak() {
+      const voices = window.speechSynthesis.getVoices();
+
+      // Priority: Indian English Neural > Indian English > any Indian > any English
+      const preferred =
+        voices.find(v => v.name.includes('Heera'))              // Microsoft Heera (en-IN female)
+        || voices.find(v => v.name.includes('Ravi'))            // Microsoft Ravi (en-IN male)
+        || voices.find(v => v.name.includes('Neerja'))          // Microsoft Neerja
+        || voices.find(v => v.lang === 'en-IN')                 // any en-IN
+        || voices.find(v => v.name.toLowerCase().includes('india'))
+        || voices.find(v => v.lang === 'en-GB' && v.name.includes('Neural'))  // UK Neural as fallback
+        || voices.find(v => v.lang?.startsWith('en') && v.name.includes('Neural'))
+        || voices.find(v => v.lang?.startsWith('en'))
+        || voices[0];
+
+      const utterance = new SpeechSynthesisUtterance(text);
+      if (preferred) utterance.voice = preferred;
+      utterance.rate   = 0.90;   // Heera sounds most natural at this rate
+      utterance.pitch  = 1.0;
+      utterance.volume = 1.0;
+      window.speechSynthesis.speak(utterance);
+    }
+
+    // getVoices() is async on first load — wait for voiceschanged if list is empty
+    const timer = setTimeout(() => {
+      if (window.speechSynthesis.getVoices().length > 0) {
+        speak();
+      } else {
+        window.speechSynthesis.addEventListener('voiceschanged', speak, { once: true });
+      }
+    }, 650);
+
+    return () => {
+      clearTimeout(timer);
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.removeEventListener('voiceschanged', speak);
+    };
+  }, [txn._id, txn.state]);
+
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [log]);
 
   const addLog = (type, text) =>
@@ -617,9 +677,40 @@ function AgentPanel({ txn, onClose }) {
       {/* Header */}
       <div className="px-5 py-4" style={{ borderBottom: '1px solid var(--color-border)' }}>
         <div className="flex items-start justify-between mb-3">
-          <p className="text-xs uppercase tracking-widest" style={{ color: 'var(--color-text-muted)' }}>
-            Transaction Intelligence
-          </p>
+          <div className="flex items-center gap-2">
+            <p className="text-xs uppercase tracking-widest" style={{ color: 'var(--color-text-muted)' }}>
+              Transaction Intelligence
+            </p>
+            {/* Voice note badge — shown for escalated transactions */}
+            {['ESCALATED_TO_HUMAN', 'STOPPING_RULE_TRIGGERED'].includes(txn.state) && (
+              <motion.div
+                className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer"
+                style={{ background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.3)', color: '#fbbf24' }}
+                title="Click to replay voice summary"
+                onClick={() => {
+                  if (!window.speechSynthesis) return;
+                  window.speechSynthesis.cancel();
+                  const reason = txn.escalationReason?.replace(/_/g, ' ').replace('compliance violation:', '').trim() || 'agent ke paas bheja gaya';
+                  const text = `${txn.customerName} ji ka payment fail hua, Rs. ${txn.originalAmount} ka. Reason: ${reason}. Customer ko human agent ke paas bheja gaya hai. Kripya manually follow up karein.`;
+                  const u = new SpeechSynthesisUtterance(text);
+                  const voices = window.speechSynthesis.getVoices();
+                  const pref = voices.find(v => v.name.includes('Heera'))
+                    || voices.find(v => v.name.includes('Ravi'))
+                    || voices.find(v => v.lang === 'en-IN')
+                    || voices.find(v => v.lang?.startsWith('en') && v.name.includes('Neural'))
+                    || voices.find(v => v.lang?.startsWith('en'))
+                    || voices[0];
+                  if (pref) u.voice = pref;
+                  u.rate = 0.90; u.pitch = 1.0; u.volume = 1.0;
+                  window.speechSynthesis.speak(u);
+                }}
+                animate={{ opacity: [1, 0.6, 1] }}
+                transition={{ duration: 2, repeat: Infinity }}
+              >
+                🎙 Voice Summary
+              </motion.div>
+            )}
+          </div>
           <motion.button onClick={onClose} whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
             className="p-1.5 rounded-lg" style={{ color: 'var(--color-text-muted)' }}>
             <X size={16} />
