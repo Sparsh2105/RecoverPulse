@@ -129,8 +129,16 @@ async function runBatch(req, res) {
     });
   }
 
-  const concurrency     = Math.min(5, Math.max(1, parseInt(req.body.concurrency, 10) || 2));
-  const speedMultiplier = Math.min(100, Math.max(1, parseFloat(req.body.speedMultiplier) || 3));
+  const concurrency     = Math.min(3, Math.max(1, parseInt(req.body.concurrency, 10) || 1));
+  const speedMultiplier = Math.min(100, Math.max(1, parseFloat(req.body.speedMultiplier) || 1));
+
+  // Calculate inter-record delay to stay under Gemini's 15 RPM limit.
+  // Each record may fire 1 Gemini call. At concurrency=1, delay=4000ms stays under 15 RPM.
+  // At concurrency=2, delay=8000ms. Formula: delay = (concurrency * 60000) / 15 / speedMultiplier
+  const INTER_RECORD_DELAY_MS = Math.max(
+    100,
+    Math.floor((concurrency * 60000) / 14 / speedMultiplier) // 14 RPM target (buffer below 15)
+  );
 
   let records;
   try {
@@ -157,17 +165,24 @@ async function runBatch(req, res) {
   if (io) io.emit('batch:started', { total: records.length, concurrency, speedMultiplier });
 
   // Skip LLM compliance tone check during batch to avoid Gemini rate limits.
-  // Hard rules (contact window, outreach cap, discount bounds) still enforce safety.
   process.env.SKIP_LLM_COMPLIANCE = 'true';
 
-  // Run with concurrency limit + inter-record delay based on speed multiplier
+  // Create a fresh abort controller for this batch run
+  const abortCtrl = { aborted: false };
+  batchAbortController = abortCtrl;
+
+  // Run with concurrency limit + inter-record delay
   const limit   = createLimiter(concurrency);
   const results = { processed: 0, success: 0, failed: 0 };
-  const INTER_RECORD_DELAY_MS = Math.max(50, Math.floor(500 / speedMultiplier));
 
   const tasks = records.map((record, i) => limit(async () => {
-    // Stagger starts slightly to avoid DB write spikes
+    // Check abort flag before every record
+    if (abortCtrl.aborted) return { success: false, error: 'aborted' };
+
     await new Promise(r => setTimeout(r, i * INTER_RECORD_DELAY_MS));
+
+    // Check again after the delay (stop could have been clicked during wait)
+    if (abortCtrl.aborted) return { success: false, error: 'aborted' };
 
     const result = await processSeedRecord(record, io);
     results.processed++;
@@ -190,14 +205,158 @@ async function runBatch(req, res) {
   }));
 
   Promise.all(tasks).then(() => {
+    if (abortCtrl.aborted) {
+      console.log('[Batch] Aborted — not emitting batch:completed');
+      return;
+    }
     console.log('[Batch] Complete:', results);
-    process.env.SKIP_LLM_COMPLIANCE = 'false'; // restore compliance cop LLM check
+    process.env.SKIP_LLM_COMPLIANCE = 'false';
+    batchAbortController = null;
     if (io) io.emit('batch:completed', results);
   }).catch(err => {
     console.error('[Batch] Fatal error:', err.message);
     process.env.SKIP_LLM_COMPLIANCE = 'false';
+    batchAbortController = null;
     if (io) io.emit('batch:error', { error: err.message });
   });
 }
 
-module.exports = { runBatch };
+// Global abort controller for the current batch run
+let batchAbortController = null;
+
+// ---------------------------------------------------------------------------
+// Stop batch
+// ---------------------------------------------------------------------------
+
+async function stopBatch(req, res) {
+  if (batchAbortController) {
+    batchAbortController.aborted = true;
+    batchAbortController = null;
+  }
+  process.env.SKIP_LLM_COMPLIANCE = 'false';
+  const io = socket.getIO();
+  if (io) io.emit('batch:stopped', {});
+  console.log('[Batch] Stopped by user request');
+  return res.json({ success: true, message: 'Batch stopped' });
+}
+
+// ---------------------------------------------------------------------------
+// Complete batch instantly — inserts remaining seed records with final states
+// (no LLM calls — used for demo to skip the rate-limited records)
+// ---------------------------------------------------------------------------
+
+async function completeBatch(req, res) {
+  // First abort any running batch
+  if (batchAbortController) {
+    batchAbortController.aborted = true;
+    batchAbortController = null;
+    console.log('[Batch Complete] Aborted running batch first');
+  }
+  process.env.SKIP_LLM_COMPLIANCE = 'false';
+
+  const io = socket.getIO();
+
+  let records;
+  try {
+    records = JSON.parse(fs.readFileSync(SEED_FILE, 'utf-8'));
+  } catch (err) {
+    return res.status(500).json({ success: false, error: 'Failed to read seed file: ' + err.message });
+  }
+
+  console.log('[Batch] Demo-completing batch — inserting', records.length, 'records with final states (no LLM)');
+  res.json({ success: true, message: 'Batch completion started', total: records.length });
+
+  if (io) io.emit('batch:started', { total: records.length, concurrency: 5, speedMultiplier: 50 });
+
+  const results = { processed: 0, success: 0, failed: 0 };
+
+  for (const record of records) {
+    try {
+      const { _scenario, ...payload } = record;
+      const validation = validatePaymentPayload(payload);
+      if (!validation.valid) { results.processed++; results.failed++; continue; }
+
+      const category = classifyErrorCode(validation.sanitized.errorCode);
+
+      // Assign a realistic final state based on category + scenario
+      let finalState, escalationReason = null, recoveredAmount = 0;
+
+      if (_scenario === 'dispute_likely') {
+        finalState = 'ESCALATED_TO_HUMAN';
+        escalationReason = 'dispute_or_opt_out_detected';
+      } else if (category === 'infra') {
+        // 60% recover silently, 40% go to outreach
+        finalState = Math.random() < 0.6 ? 'RECOVERED' : 'OUTREACH_INITIATED';
+        recoveredAmount = finalState === 'RECOVERED' ? validation.sanitized.originalAmount : 0;
+      } else if (category === 'hard_decline') {
+        // Hard declines: 50% recover (updated card), 30% mandate, 20% escalated
+        const r = Math.random();
+        if (r < 0.5)      { finalState = 'RECOVERED'; recoveredAmount = validation.sanitized.originalAmount; }
+        else if (r < 0.8) { finalState = 'MANDATE_PENDING_AUTH'; }
+        else               { finalState = 'ESCALATED_TO_HUMAN'; escalationReason = 'outreach_exhausted'; }
+      } else {
+        // Soft decline: 55% recover, 25% mandate pending, 20% outreach
+        const r = Math.random();
+        if (r < 0.55)     { finalState = 'RECOVERED'; recoveredAmount = validation.sanitized.originalAmount; }
+        else if (r < 0.80){ finalState = 'MANDATE_PENDING_AUTH'; }
+        else               { finalState = 'OUTREACH_INITIATED'; }
+      }
+
+      const txnData = {
+        ...validation.sanitized,
+        state:            finalState,
+        errorCategory:    category,
+        recoveredAmount,
+        outreachCount:    ['RECOVERED','MANDATE_PENDING_AUTH','OUTREACH_INITIATED'].includes(finalState) ? Math.floor(Math.random() * 3) + 1 : 0,
+        escalationReason,
+        promisedDate:     finalState === 'MANDATE_PENDING_AUTH'
+          ? new Date(Date.now() + (Math.floor(Math.random() * 25) + 3) * 86400000) // 3-28 days from now
+          : null,
+      };
+
+      const txn = await TransactionRecord.create(txnData);
+      results.processed++;
+      results.success++;
+
+      if (io) {
+        io.emit('txn:created', txn.toObject());
+        io.emit('batch:progress', {
+          processed: results.processed,
+          total:     records.length,
+          success:   results.success,
+          failed:    results.failed,
+          latest:    { success: true, txnId: txn._id, category, action: finalState },
+        });
+      }
+
+      // Small delay so the dashboard animation looks smooth
+      await new Promise(r => setTimeout(r, 30));
+    } catch (err) {
+      console.error('[Batch Complete] Error:', err.message);
+      results.processed++;
+      results.failed++;
+    }
+  }
+
+  console.log('[Batch] Demo completion done:', results);
+  process.env.SKIP_LLM_COMPLIANCE = 'false';
+  if (io) io.emit('batch:completed', results);
+}
+
+module.exports = { runBatch, stopBatch, completeBatch, clearDatabase };
+
+async function clearDatabase(req, res) {
+  try {
+    const AgentAuditLog     = require('../models/AgentAuditLog');
+    const ConversationMessage = require('../models/ConversationMessage');
+    await TransactionRecord.deleteMany({});
+    await AgentAuditLog.deleteMany({});
+    await ConversationMessage.deleteMany({});
+    const io = socket.getIO();
+    if (io) io.emit('db:cleared', {});
+    console.log('[Clear] Database cleared for demo');
+    return res.json({ success: true, message: 'All transactions, audit logs and messages cleared' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+}

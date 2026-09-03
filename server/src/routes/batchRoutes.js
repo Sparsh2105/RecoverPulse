@@ -1,11 +1,13 @@
 'use strict';
 
 const express = require('express');
-const { runBatch } = require('../controllers/batchController');
+const { runBatch, stopBatch, completeBatch, clearDatabase } = require('../controllers/batchController');
 
 const router = express.Router();
 
-// POST /api/batch/run
-router.post('/run', runBatch);
+router.post('/run',      runBatch);
+router.post('/stop',     stopBatch);
+router.post('/complete', completeBatch);
+router.post('/clear',    clearDatabase);
 
 module.exports = router;

@@ -1426,22 +1426,69 @@ export default function App() {
       setRecentBatch(prev => [...prev.filter(x => x._id !== t._id), t].slice(-10));
       api.getStats().then(r => setStats(r.data)).catch(() => {});
     });
-    socket.on('batch:started', () => { setBatchRunning(true); setBatchProgress({ processed:0,total:0,success:0,failed:0 }); setRecentBatch([]); });
+    socket.on('batch:started', () => { setBatchRunning(true); setBatchProgress({ processed:0,total:50,success:0,failed:0 }); setRecentBatch([]); });
     socket.on('batch:progress', (p) => { setBatchProgress(p); if (p.processed % 5 === 0) api.getStats().then(r => setStats(r.data)).catch(() => {}); });
-    socket.on('batch:completed', (p) => { setBatchRunning(false); setBatchProgress(p); api.getStats().then(r => setStats(r.data)).catch(() => {}); });
+    socket.on('batch:completed', (p) => { setBatchRunning(false); setBatchProgress(p); fetchData(); }); // full refresh
     socket.on('batch:error', () => setBatchRunning(false));
+    socket.on('batch:stopped', () => setBatchRunning(false));
+    socket.on('db:cleared', () => {
+      setTransactions([]);
+      setStats({ totalTransactions: 0, recovered: 0, failed: 0, escalated: 0, inProgress: 0, grossValueAtRisk: 0, totalRecoveredAmount: 0, recoveryRate: '0.0' });
+      setBatchProgress(null);
+      setRecentBatch([]);
+      setFeedEntries([]);
+    });
     socket.on('audit:created', (e) => setFeedEntries(prev => [...prev, { ...e, ts: new Date() }].slice(-20)));
     return () => {
-      ['connect','disconnect','txn:created','txn:updated','batch:started','batch:progress','batch:completed','batch:error','audit:created']
+      ['connect','disconnect','txn:created','txn:updated','batch:started','batch:progress','batch:completed','batch:error','batch:stopped','db:cleared','audit:created']
         .forEach(ev => socket.off(ev));
       socket.disconnect();
     };
   }, [fetchData]);
 
+  const clearDb = async () => {
+    if (!window.confirm('Clear ALL transactions, audit logs and messages? This cannot be undone.')) return;
+    try {
+      await api.clearDatabase();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   const runBatch = async () => {
     if (batchRunning) return;
-    try { await api.runBatch({ speedMultiplier: 10, concurrency: 5 }); }
-    catch (err) { setError(err.message); setBatchRunning(false); }
+    try {
+      // concurrency=1, speedMultiplier=5:
+      // delay = floor((1 * 60000) / 14 / 5) = 857ms between records
+      // 50 records × 857ms ≈ 43 seconds total — stays under 15 RPM
+      await api.runBatch({ speedMultiplier: 5, concurrency: 1 });
+    } catch (err) {
+      setError(err.message);
+      setBatchRunning(false);
+    }
+  };
+
+  const stopBatch = async () => {
+    try {
+      await api.stopBatch();
+      setBatchRunning(false);
+    } catch (err) {
+      setBatchRunning(false);
+    }
+  };
+
+  const completeBatch = async () => {
+    try {
+      // Always stop the running batch first, then complete
+      await api.stopBatch().catch(() => {}); // silent — may not be running
+      setBatchRunning(true);
+      setBatchProgress({ processed: 0, total: 50, success: 0, failed: 0 });
+      setRecentBatch([]);
+      await api.completeBatch();
+    } catch (err) {
+      setError(err.message);
+      setBatchRunning(false);
+    }
   };
 
   const simulatePayment = async () => {
@@ -1615,27 +1662,64 @@ export default function App() {
                 {serverOnline ? 'Server Online' : 'Server Offline'}
               </motion.div>
 
-              {/* Run Batch */}
-              <motion.button disabled={!serverOnline || batchRunning} onClick={runBatch}
-                className="px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2"
+              {/* Clear DB — demo utility */}
+              <motion.button disabled={!serverOnline || batchRunning} onClick={clearDb}
+                className="px-3 py-2 rounded-xl text-xs font-medium"
                 style={{
                   background: 'transparent',
                   border: '1px solid var(--color-border)',
-                  color: 'var(--color-text-primary)',
+                  color: 'var(--color-text-muted)',
                   opacity: !serverOnline || batchRunning ? 0.4 : 1,
                   cursor: !serverOnline || batchRunning ? 'not-allowed' : 'pointer',
                 }}
-                whileHover={serverOnline && !batchRunning ? { borderColor: 'var(--color-border-hover)' } : {}}
-                whileTap={serverOnline && !batchRunning ? { scale: 0.97 } : {}}>
-                {batchRunning ? (
-                  <>
+                whileHover={serverOnline && !batchRunning ? { borderColor: 'rgba(248,113,113,0.4)', color: '#f87171' } : {}}
+                title="Clear all transactions from DB (demo reset)">
+                🗑 Clear DB
+              </motion.button>
+
+              {/* Batch controls */}
+              {!batchRunning ? (
+                <motion.button disabled={!serverOnline} onClick={runBatch}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2"
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid var(--color-border)',
+                    color: 'var(--color-text-primary)',
+                    opacity: !serverOnline ? 0.4 : 1,
+                    cursor: !serverOnline ? 'not-allowed' : 'pointer',
+                  }}
+                  whileHover={serverOnline ? { borderColor: 'var(--color-border-hover)' } : {}}
+                  whileTap={serverOnline ? { scale: 0.97 } : {}}>
+                  <Zap size={14} /> Run Batch (50)
+                </motion.button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  {/* Running indicator */}
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold"
+                    style={{ background: 'transparent', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)' }}>
                     <motion.div className="w-3 h-3 border-2 rounded-full"
                       style={{ borderColor: '#448aff', borderTopColor: 'transparent' }}
                       animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }} />
-                    {batchProgress ? `${batchProgress.processed}/${batchProgress.total}` : 'Starting...'}
-                  </>
-                ) : <><Zap size={14} /> Run Batch (50)</>}
-              </motion.button>
+                    {batchProgress ? `${batchProgress.processed}/${batchProgress.total || 50}` : 'Starting...'}
+                  </div>
+                  {/* Stop button */}
+                  <motion.button onClick={stopBatch}
+                    className="px-3 py-2 rounded-xl text-xs font-semibold"
+                    style={{ background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)', color: '#f87171', cursor: 'pointer' }}
+                    whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                    title="Stop batch">
+                    ■ Stop
+                  </motion.button>
+                  {/* Complete (demo skip) button */}
+                  <motion.button onClick={completeBatch}
+                    className="px-3 py-2 rounded-xl text-xs font-semibold"
+                    style={{ background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.3)', color: '#34d399', cursor: 'pointer' }}
+                    whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                    title="Skip to end — inserts remaining records instantly">
+                    ⚡ Complete All
+                  </motion.button>
+                </div>
+              )}
 
               {/* Simulate */}
               <motion.button disabled={!serverOnline} onClick={simulatePayment}

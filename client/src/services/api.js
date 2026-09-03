@@ -71,10 +71,16 @@ const api = {
 
   // ── Batch runner (Day 8) ──
   runBatch: (options = {}) =>
-    request('/batch/run', {
-      method: 'POST',
-      body: JSON.stringify(options),
-    }),
+    request('/batch/run', { method: 'POST', body: JSON.stringify(options) }),
+
+  stopBatch: () =>
+    request('/batch/stop', { method: 'POST', body: JSON.stringify({}) }),
+
+  completeBatch: () =>
+    request('/batch/complete', { method: 'POST', body: JSON.stringify({}) }),
+
+  clearDatabase: () =>
+    request('/batch/clear', { method: 'POST', body: JSON.stringify({}) }),
 
   // ── Health ──
   healthCheck: () => request('/health'),
