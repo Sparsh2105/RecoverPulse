@@ -1427,7 +1427,14 @@ export default function App() {
       api.getStats().then(r => setStats(r.data)).catch(() => {});
     });
     socket.on('batch:started', () => { setBatchRunning(true); setBatchProgress({ processed:0,total:50,success:0,failed:0 }); setRecentBatch([]); });
-    socket.on('batch:progress', (p) => { setBatchProgress(p); if (p.processed % 5 === 0) api.getStats().then(r => setStats(r.data)).catch(() => {}); });
+    socket.on('batch:progress', (p) => {
+      // Only update if batch is still marked as running — ignore stale events after completion
+      setBatchProgress(prev => {
+        if (!prev || p.processed < (prev.processed || 0)) return prev; // ignore backwards movement
+        return p;
+      });
+      if (p.processed % 5 === 0) api.getStats().then(r => setStats(r.data)).catch(() => {});
+    });
     socket.on('batch:completed', (p) => { setBatchRunning(false); setBatchProgress(p); fetchData(); }); // full refresh
     socket.on('batch:error', () => setBatchRunning(false));
     socket.on('batch:stopped', () => setBatchRunning(false));

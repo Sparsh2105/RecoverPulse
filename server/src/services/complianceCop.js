@@ -9,7 +9,7 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const genAI = new GoogleGenerativeAI(process.env.GROQ_API_KEY);
-const COMPLIANCE_MODEL = 'gemini-2.5-flash';
+const COMPLIANCE_MODEL = 'gemini-2.5-flash-lite';
 
 // IST offset = UTC+5:30
 const IST_OFFSET_HOURS = 5.5;

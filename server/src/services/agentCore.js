@@ -23,7 +23,7 @@ const { TOOL_SCHEMAS, executeTool } = require('./agentTools');
 const { reviewAction } = require('./complianceCop');
 
 const genAI = new GoogleGenerativeAI(process.env.GROQ_API_KEY);
-const MODEL = 'gemini-2.5-flash';
+const MODEL = 'gemini-3.5-flash-lite';
 
 // Regex pre-filter — fast check before touching the LLM.
 // If any of these match, immediately escalate without an LLM call.
